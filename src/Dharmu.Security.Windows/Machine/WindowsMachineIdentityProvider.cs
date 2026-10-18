@@ -32,15 +32,22 @@ public sealed class WindowsMachineIdentityProvider : IMachineIdentityProvider
 
         foreach (var provider in providers)
         {
-            if (CngKey.Exists(
-                    DeviceKeyName,
-                    provider,
-                    CngKeyOpenOptions.MachineKey))
+            try
             {
-                return CngKey.Open(
-                    DeviceKeyName,
-                    provider,
-                    CngKeyOpenOptions.MachineKey);
+                if (CngKey.Exists(
+                        DeviceKeyName,
+                        provider,
+                        CngKeyOpenOptions.MachineKey))
+                {
+                    return CngKey.Open(
+                        DeviceKeyName,
+                        provider,
+                        CngKeyOpenOptions.MachineKey);
+                }
+            }
+            catch (CryptographicException)
+            {
+                // Try the next Windows key-storage provider.
             }
         }
 
