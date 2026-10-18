@@ -37,59 +37,79 @@ public sealed class LicenseMiddleware
             return;
         }
 
-        var licensePath = ResolvePath(environment.ContentRootPath, settings.LicenseFilePath);
-        var publicKeyPath = ResolvePath(environment.ContentRootPath, settings.PublicKeyFilePath);
-
-        if (!File.Exists(licensePath) || !File.Exists(publicKeyPath))
+        try
         {
-            _logger.LogWarning("License files are not configured.");
-            await RejectAsync(context);
-            return;
+            var licensePath = ResolvePath(
+                environment.ContentRootPath,
+                settings.LicenseFilePath);
+
+            var publicKeyPath = ResolvePath(
+                environment.ContentRootPath,
+                settings.PublicKeyFilePath);
+
+            if (!File.Exists(licensePath) || !File.Exists(publicKeyPath))
+            {
+                _logger.LogWarning("License files are not configured.");
+                await RejectAsync(context);
+                return;
+            }
+
+            var licenseContent = await File.ReadAllTextAsync(
+                licensePath,
+                context.RequestAborted);
+
+            var publicKeyPem = await File.ReadAllTextAsync(
+                publicKeyPath,
+                context.RequestAborted);
+
+            var utcNow = DateTime.UtcNow;
+
+            var result = validator.Validate(
+                licenseContent,
+                publicKeyPem,
+                settings.ProductCode,
+                machineIdentityProvider.GetMachineCode(),
+                utcNow);
+
+            if (!result.IsValid || result.License is null)
+            {
+                _logger.LogWarning(
+                    "License validation failed with status {Status}.",
+                    result.Status);
+
+                await RejectAsync(context);
+                return;
+            }
+
+            var clockResult = await clockGuard.CheckAsync(
+                result.License,
+                utcNow,
+                context.RequestAborted);
+
+            if (!clockResult.IsValid)
+            {
+                _logger.LogWarning(
+                    "License clock validation failed with status {Status}.",
+                    clockResult.Status);
+
+                await RejectAsync(context);
+                return;
+            }
+
+            await _next(context);
         }
-
-        var licenseContent = await File.ReadAllTextAsync(
-            licensePath,
-            context.RequestAborted);
-
-        var publicKeyPem = await File.ReadAllTextAsync(
-            publicKeyPath,
-            context.RequestAborted);
-
-        var utcNow = DateTime.UtcNow;
-
-        var result = validator.Validate(
-            licenseContent,
-            publicKeyPem,
-            settings.ProductCode,
-            machineIdentityProvider.GetMachineCode(),
-            utcNow);
-
-        if (!result.IsValid || result.License is null)
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
-            _logger.LogWarning(
-                "License validation failed with status {Status}.",
-                result.Status);
-
-            await RejectAsync(context);
-            return;
+            throw;
         }
-
-        var clockResult = await clockGuard.CheckAsync(
-            result.License,
-            utcNow,
-            context.RequestAborted);
-
-        if (!clockResult.IsValid)
+        catch (Exception exception)
         {
-            _logger.LogWarning(
-                "License clock validation failed with status {Status}.",
-                clockResult.Status);
+            _logger.LogError(
+                exception,
+                "License enforcement failed unexpectedly.");
 
             await RejectAsync(context);
-            return;
         }
-
-        await _next(context);
     }
 
     private static bool IsExcluded(
@@ -109,6 +129,11 @@ public sealed class LicenseMiddleware
 
     private static async Task RejectAsync(HttpContext context)
     {
+        if (context.Response.HasStarted)
+        {
+            return;
+        }
+
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "text/plain";
         await context.Response.WriteAsync(
