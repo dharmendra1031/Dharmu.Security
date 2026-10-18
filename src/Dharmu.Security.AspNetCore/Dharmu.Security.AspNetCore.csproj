@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <PackageId>Dharmu.Security.AspNetCore</PackageId>
+    <Description>ASP.NET Core middleware for Dharmu.Security offline licensing.</Description>
+    <Version>0.1.0</Version>
+    <Authors>Dharmu</Authors>
+    <RepositoryUrl>https://github.com/dharmendra1031/Dharmu.Security</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\Dharmu.Security.Core\Dharmu.Security.Core.csproj" />
+    <ProjectReference Include="..\Dharmu.Security.Windows\Dharmu.Security.Windows.csproj" />
+  </ItemGroup>
+</Project>
