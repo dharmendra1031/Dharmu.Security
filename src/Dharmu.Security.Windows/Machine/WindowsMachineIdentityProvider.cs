@@ -1,31 +1,50 @@
 using System.Security.Cryptography;
-using System.Text;
 using Dharmu.Security.Core.Machine;
-using Microsoft.Win32;
 
 namespace Dharmu.Security.Windows.Machine;
 
 public sealed class WindowsMachineIdentityProvider : IMachineIdentityProvider
 {
-    private const string RegistryPath = @"SOFTWARE\Microsoft\Cryptography";
-    private const string RegistryValue = "MachineGuid";
+    public const string DeviceKeyName = "DharmuSecurityDeviceIdentity";
 
     public string GetMachineCode()
     {
         if (!OperatingSystem.IsWindows())
         {
-            throw new PlatformNotSupportedException("Windows machine identity is only available on Windows.");
+            throw new PlatformNotSupportedException(
+                "Windows machine identity is only available on Windows.");
         }
 
-        using var key = Registry.LocalMachine.OpenSubKey(RegistryPath, writable: false);
-        var machineGuid = key?.GetValue(RegistryValue)?.ToString();
+        using var key = OpenDeviceKey();
+        using var ecdsa = new ECDsaCng(key);
 
-        if (string.IsNullOrWhiteSpace(machineGuid))
+        var publicKey = ecdsa.ExportSubjectPublicKeyInfo();
+        return Convert.ToHexString(SHA256.HashData(publicKey));
+    }
+
+    private static CngKey OpenDeviceKey()
+    {
+        var providers = new[]
         {
-            throw new InvalidOperationException("Windows machine identity is unavailable.");
+            CngProvider.MicrosoftPlatformCryptoProvider,
+            CngProvider.MicrosoftSoftwareKeyStorageProvider
+        };
+
+        foreach (var provider in providers)
+        {
+            if (CngKey.Exists(
+                    DeviceKeyName,
+                    provider,
+                    CngKeyOpenOptions.MachineKey))
+            {
+                return CngKey.Open(
+                    DeviceKeyName,
+                    provider,
+                    CngKeyOpenOptions.MachineKey);
+            }
         }
 
-        var source = Encoding.UTF8.GetBytes($"dharmu-security:v1|{machineGuid.Trim()}");
-        return Convert.ToHexString(SHA256.HashData(source));
+        throw new InvalidOperationException(
+            "Dharmu.Security device identity is not provisioned on this machine.");
     }
 }
