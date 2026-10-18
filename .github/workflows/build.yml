@@ -21,8 +21,14 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Restore
+      - name: Restore security package
         run: dotnet restore src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj
 
-      - name: Build
+      - name: Build security package
         run: dotnet build src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj --configuration Release --no-restore
+
+      - name: Restore device tool
+        run: dotnet restore src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj
+
+      - name: Build device tool
+        run: dotnet build src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj --configuration Release --no-restore
