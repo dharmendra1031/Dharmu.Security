@@ -5,6 +5,7 @@ namespace Dharmu.Security.Core.Licensing;
 
 public sealed class EcdsaLicenseValidator : ILicenseValidator
 {
+    private const string SupportedAlgorithm = "ECDSA-P256-SHA256";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public LicenseValidationResult Validate(
@@ -18,6 +19,8 @@ public sealed class EcdsaLicenseValidator : ILicenseValidator
         {
             var envelope = JsonSerializer.Deserialize<LicenseEnvelope>(licenseContent, JsonOptions);
             if (envelope is null ||
+                !string.Equals(envelope.Algorithm, SupportedAlgorithm, StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(envelope.KeyId) ||
                 string.IsNullOrWhiteSpace(envelope.Payload) ||
                 string.IsNullOrWhiteSpace(envelope.Signature))
             {
