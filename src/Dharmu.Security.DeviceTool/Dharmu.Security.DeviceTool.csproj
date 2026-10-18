@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Dharmu.Security.DeviceTool</AssemblyName>
+    <RootNamespace>Dharmu.Security.DeviceTool</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dharmu.Security.Windows\Dharmu.Security.Windows.csproj" />
+  </ItemGroup>
+</Project>
