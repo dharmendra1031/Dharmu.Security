@@ -1,0 +1,37 @@
+name: publish-packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'security-v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj
+
+      - name: Pack Core
+        run: dotnet pack src/Dharmu.Security.Core/Dharmu.Security.Core.csproj --configuration Release --no-restore --output artifacts
+
+      - name: Pack Windows
+        run: dotnet pack src/Dharmu.Security.Windows/Dharmu.Security.Windows.csproj --configuration Release --no-restore --output artifacts
+
+      - name: Pack ASP.NET Core
+        run: dotnet pack src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj --configuration Release --no-restore --output artifacts
+
+      - name: Publish
+        run: dotnet nuget push "artifacts/*.nupkg" --source "https://nuget.pkg.github.com/dharmendra1031/index.json" --api-key "${{ secrets.GITHUB_TOKEN }}" --skip-duplicate
