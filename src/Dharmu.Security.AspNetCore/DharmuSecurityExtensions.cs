@@ -24,6 +24,7 @@ public static class DharmuSecurityExtensions
 
         services.AddSingleton<ILicenseValidator, EcdsaLicenseValidator>();
         services.AddSingleton<IMachineIdentityProvider, WindowsMachineIdentityProvider>();
+        services.AddSingleton<IActivationRequestGenerator, ActivationRequestGenerator>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
 
         return services;
