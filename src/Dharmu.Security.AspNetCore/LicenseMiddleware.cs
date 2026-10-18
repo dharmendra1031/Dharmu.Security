@@ -1,7 +1,9 @@
+using Dharmu.Security.AspNetCore.Licensing;
 using Dharmu.Security.Core.Licensing;
 using Dharmu.Security.Core.Machine;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Dharmu.Security.AspNetCore;
@@ -9,16 +11,21 @@ namespace Dharmu.Security.AspNetCore;
 public sealed class LicenseMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly ILogger<LicenseMiddleware> _logger;
 
-    public LicenseMiddleware(RequestDelegate next)
+    public LicenseMiddleware(
+        RequestDelegate next,
+        ILogger<LicenseMiddleware> logger)
     {
         _next = next;
+        _logger = logger;
     }
 
     public async Task InvokeAsync(
         HttpContext context,
         ILicenseValidator validator,
         IMachineIdentityProvider machineIdentityProvider,
+        ILicenseClockGuard clockGuard,
         IOptions<DharmuSecurityOptions> options,
         IHostEnvironment environment)
     {
@@ -35,40 +42,76 @@ public sealed class LicenseMiddleware
 
         if (!File.Exists(licensePath) || !File.Exists(publicKeyPath))
         {
-            await RejectAsync(context, "License is not configured.");
+            _logger.LogWarning("License files are not configured.");
+            await RejectAsync(context);
             return;
         }
 
-        var licenseContent = await File.ReadAllTextAsync(licensePath, context.RequestAborted);
-        var publicKeyPem = await File.ReadAllTextAsync(publicKeyPath, context.RequestAborted);
+        var licenseContent = await File.ReadAllTextAsync(
+            licensePath,
+            context.RequestAborted);
+
+        var publicKeyPem = await File.ReadAllTextAsync(
+            publicKeyPath,
+            context.RequestAborted);
+
+        var utcNow = DateTime.UtcNow;
 
         var result = validator.Validate(
             licenseContent,
             publicKeyPem,
             settings.ProductCode,
             machineIdentityProvider.GetMachineCode(),
-            DateTime.UtcNow);
+            utcNow);
 
-        if (!result.IsValid)
+        if (!result.IsValid || result.License is null)
         {
-            await RejectAsync(context, $"License validation failed: {result.Status}.");
+            _logger.LogWarning(
+                "License validation failed with status {Status}.",
+                result.Status);
+
+            await RejectAsync(context);
+            return;
+        }
+
+        var clockResult = await clockGuard.CheckAsync(
+            result.License,
+            utcNow,
+            context.RequestAborted);
+
+        if (!clockResult.IsValid)
+        {
+            _logger.LogWarning(
+                "License clock validation failed with status {Status}.",
+                clockResult.Status);
+
+            await RejectAsync(context);
             return;
         }
 
         await _next(context);
     }
 
-    private static bool IsExcluded(PathString path, IEnumerable<string> excludedPaths) =>
+    private static bool IsExcluded(
+        PathString path,
+        IEnumerable<string> excludedPaths) =>
         excludedPaths.Any(excluded =>
-            path.StartsWithSegments(new PathString(excluded), StringComparison.OrdinalIgnoreCase));
+            path.StartsWithSegments(
+                new PathString(excluded),
+                StringComparison.OrdinalIgnoreCase));
 
-    private static string ResolvePath(string contentRootPath, string path) =>
-        Path.IsPathRooted(path) ? path : Path.Combine(contentRootPath, path);
+    private static string ResolvePath(
+        string contentRootPath,
+        string path) =>
+        Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(contentRootPath, path);
 
-    private static async Task RejectAsync(HttpContext context, string message)
+    private static async Task RejectAsync(HttpContext context)
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "text/plain";
-        await context.Response.WriteAsync(message);
+        await context.Response.WriteAsync(
+            "License validation failed. Please contact support.");
     }
 }
