@@ -1,3 +1,4 @@
+using Dharmu.Security.AspNetCore.Licensing;
 using Dharmu.Security.Core.Licensing;
 using Dharmu.Security.Core.Machine;
 using Dharmu.Security.Core.Secrets;
@@ -20,12 +21,19 @@ public static class DharmuSecurityExtensions
             .Validate(
                 options => !string.IsNullOrWhiteSpace(options.ProductCode),
                 "ProductCode is required.")
+            .Validate(
+                options => options.ClockRollbackTolerance >= TimeSpan.Zero,
+                "ClockRollbackTolerance cannot be negative.")
+            .Validate(
+                options => options.ClockStatePersistInterval > TimeSpan.Zero,
+                "ClockStatePersistInterval must be greater than zero.")
             .ValidateOnStart();
 
         services.AddSingleton<ILicenseValidator, EcdsaLicenseValidator>();
         services.AddSingleton<IMachineIdentityProvider, WindowsMachineIdentityProvider>();
         services.AddSingleton<IActivationRequestGenerator, ActivationRequestGenerator>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
+        services.AddSingleton<ILicenseClockGuard, LicenseClockGuard>();
 
         return services;
     }
