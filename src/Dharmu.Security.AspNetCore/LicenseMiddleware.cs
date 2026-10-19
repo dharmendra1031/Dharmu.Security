@@ -43,13 +43,9 @@ public sealed class LicenseMiddleware
                 environment.ContentRootPath,
                 settings.LicenseFilePath);
 
-            var publicKeyPath = ResolvePath(
-                environment.ContentRootPath,
-                settings.PublicKeyFilePath);
-
-            if (!File.Exists(licensePath) || !File.Exists(publicKeyPath))
+            if (!File.Exists(licensePath))
             {
-                _logger.LogWarning("License files are not configured.");
+                _logger.LogWarning("License file is not configured.");
                 await RejectAsync(context);
                 return;
             }
@@ -58,15 +54,13 @@ public sealed class LicenseMiddleware
                 licensePath,
                 context.RequestAborted);
 
-            var publicKeyPem = await File.ReadAllTextAsync(
-                publicKeyPath,
-                context.RequestAborted);
-
             var utcNow = DateTime.UtcNow;
 
             var result = validator.Validate(
                 licenseContent,
-                publicKeyPem,
+                new Dictionary<string, string>(
+                    settings.TrustedPublicKeys,
+                    StringComparer.Ordinal),
                 settings.ProductCode,
                 machineIdentityProvider.GetMachineCode(),
                 utcNow);
@@ -98,7 +92,8 @@ public sealed class LicenseMiddleware
 
             await _next(context);
         }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        catch (OperationCanceledException) when (
+            context.RequestAborted.IsCancellationRequested)
         {
             throw;
         }
@@ -136,6 +131,7 @@ public sealed class LicenseMiddleware
 
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "text/plain";
+
         await context.Response.WriteAsync(
             "License validation failed. Please contact support.");
     }
