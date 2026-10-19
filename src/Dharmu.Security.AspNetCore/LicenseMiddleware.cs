@@ -58,9 +58,7 @@ public sealed class LicenseMiddleware
 
             var result = validator.Validate(
                 licenseContent,
-                new Dictionary<string, string>(
-                    settings.TrustedPublicKeys,
-                    StringComparer.Ordinal),
+                settings.TrustedPublicKeys,
                 settings.ProductCode,
                 machineIdentityProvider.GetMachineCode(),
                 utcNow);
