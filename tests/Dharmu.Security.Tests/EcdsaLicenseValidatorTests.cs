@@ -1,0 +1,263 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using Dharmu.Security.Core.Licensing;
+
+namespace Dharmu.Security.Tests;
+
+public sealed class EcdsaLicenseValidatorTests
+{
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web);
+
+    private readonly EcdsaLicenseValidator _validator = new();
+
+    [Fact]
+    public void ValidLicense_ReturnsValid()
+    {
+        using var signingKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var license = CreateLicense(
+            signingKey,
+            productCode: "ERP",
+            machineCode: "MACHINE-A",
+            validFromUtc: now.AddDays(-1),
+            expiresAtUtc: now.AddDays(30));
+
+        var result = _validator.Validate(
+            license,
+            TrustedKeys(signingKey),
+            "ERP",
+            "MACHINE-A",
+            now);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(LicenseValidationStatus.Valid, result.Status);
+    }
+
+    [Fact]
+    public void TamperedPayload_ReturnsInvalidSignature()
+    {
+        using var signingKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var license = CreateLicense(
+            signingKey,
+            productCode: "ERP",
+            machineCode: "MACHINE-A",
+            validFromUtc: now.AddDays(-1),
+            expiresAtUtc: now.AddDays(30));
+
+        var envelope = JsonSerializer.Deserialize<LicenseEnvelope>(
+            license,
+            JsonOptions)!;
+
+        var payload = JsonSerializer.Deserialize<LicensePayload>(
+            Convert.FromBase64String(envelope.Payload),
+            JsonOptions)!;
+
+        var tamperedPayload = JsonSerializer.SerializeToUtf8Bytes(
+            new LicensePayload
+            {
+                LicenseId = payload.LicenseId,
+                CustomerId = payload.CustomerId,
+                ProductId = payload.ProductId,
+                ProductCode = payload.ProductCode,
+                MachineCode = payload.MachineCode,
+                IssuedAtUtc = payload.IssuedAtUtc,
+                ValidFromUtc = payload.ValidFromUtc,
+                ExpiresAtUtc = now.AddYears(10),
+                IsLifetime = true
+            },
+            JsonOptions);
+
+        var tampered = JsonSerializer.Serialize(
+            new LicenseEnvelope
+            {
+                Algorithm = envelope.Algorithm,
+                KeyId = envelope.KeyId,
+                Payload = Convert.ToBase64String(tamperedPayload),
+                Signature = envelope.Signature
+            },
+            JsonOptions);
+
+        var result = _validator.Validate(
+            tampered,
+            TrustedKeys(signingKey),
+            "ERP",
+            "MACHINE-A",
+            now);
+
+        Assert.Equal(
+            LicenseValidationStatus.InvalidSignature,
+            result.Status);
+    }
+
+    [Fact]
+    public void WrongProduct_ReturnsProductMismatch()
+    {
+        using var signingKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var result = _validator.Validate(
+            CreateLicense(
+                signingKey,
+                "ERP",
+                "MACHINE-A",
+                now.AddDays(-1),
+                now.AddDays(30)),
+            TrustedKeys(signingKey),
+            "POS",
+            "MACHINE-A",
+            now);
+
+        Assert.Equal(
+            LicenseValidationStatus.ProductMismatch,
+            result.Status);
+    }
+
+    [Fact]
+    public void WrongMachine_ReturnsMachineMismatch()
+    {
+        using var signingKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var result = _validator.Validate(
+            CreateLicense(
+                signingKey,
+                "ERP",
+                "MACHINE-A",
+                now.AddDays(-1),
+                now.AddDays(30)),
+            TrustedKeys(signingKey),
+            "ERP",
+            "MACHINE-B",
+            now);
+
+        Assert.Equal(
+            LicenseValidationStatus.MachineMismatch,
+            result.Status);
+    }
+
+    [Fact]
+    public void ExpiredLicense_ReturnsExpired()
+    {
+        using var signingKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var result = _validator.Validate(
+            CreateLicense(
+                signingKey,
+                "ERP",
+                "MACHINE-A",
+                now.AddDays(-30),
+                now.AddSeconds(-1)),
+            TrustedKeys(signingKey),
+            "ERP",
+            "MACHINE-A",
+            now);
+
+        Assert.Equal(LicenseValidationStatus.Expired, result.Status);
+    }
+
+    [Fact]
+    public void RevokedLicense_ReturnsRevoked()
+    {
+        using var signingKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var result = _validator.Validate(
+            CreateLicense(
+                signingKey,
+                "ERP",
+                "MACHINE-A",
+                now.AddDays(-1),
+                now.AddDays(30),
+                isRevoked: true),
+            TrustedKeys(signingKey),
+            "ERP",
+            "MACHINE-A",
+            now);
+
+        Assert.Equal(LicenseValidationStatus.Revoked, result.Status);
+    }
+
+    [Fact]
+    public void UnknownKeyId_ReturnsUnknownSigningKey()
+    {
+        using var signingKey = CreateKey();
+        using var differentKey = CreateKey();
+        var now = DateTime.UtcNow;
+
+        var result = _validator.Validate(
+            CreateLicense(
+                signingKey,
+                "ERP",
+                "MACHINE-A",
+                now.AddDays(-1),
+                now.AddDays(30)),
+            new Dictionary<string, string>
+            {
+                ["secondary"] =
+                    differentKey.ExportSubjectPublicKeyInfoPem()
+            },
+            "ERP",
+            "MACHINE-A",
+            now);
+
+        Assert.Equal(
+            LicenseValidationStatus.UnknownSigningKey,
+            result.Status);
+    }
+
+    private static ECDsa CreateKey() =>
+        ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+    private static IReadOnlyDictionary<string, string> TrustedKeys(
+        ECDsa signingKey) =>
+        new Dictionary<string, string>
+        {
+            ["primary"] = signingKey.ExportSubjectPublicKeyInfoPem()
+        };
+
+    private static string CreateLicense(
+        ECDsa signingKey,
+        string productCode,
+        string machineCode,
+        DateTime validFromUtc,
+        DateTime? expiresAtUtc,
+        bool isRevoked = false)
+    {
+        var payload = new LicensePayload
+        {
+            LicenseId = 10,
+            CustomerId = 20,
+            ProductId = 30,
+            ProductCode = productCode,
+            MachineCode = machineCode,
+            IssuedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ValidFromUtc = validFromUtc,
+            ExpiresAtUtc = expiresAtUtc,
+            IsLifetime = false,
+            IsRevoked = isRevoked
+        };
+
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(
+            payload,
+            JsonOptions);
+
+        var signature = signingKey.SignData(
+            payloadBytes,
+            HashAlgorithmName.SHA256);
+
+        return JsonSerializer.Serialize(
+            new LicenseEnvelope
+            {
+                Algorithm = "ECDSA-P256-SHA256",
+                KeyId = "primary",
+                Payload = Convert.ToBase64String(payloadBytes),
+                Signature = Convert.ToBase64String(signature)
+            },
+            JsonOptions);
+    }
+}
