@@ -9,5 +9,6 @@ public enum LicenseValidationStatus
     MachineMismatch = 4,
     NotYetValid = 5,
     Expired = 6,
-    UnknownSigningKey = 7
+    UnknownSigningKey = 7,
+    Revoked = 8
 }
