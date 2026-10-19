@@ -4,4 +4,5 @@
   <Project Path="src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj" />
   <Project Path="src/Dharmu.Security.SecretTool/Dharmu.Security.SecretTool.csproj" />
   <Project Path="src/Dharmu.Security.Windows/Dharmu.Security.Windows.csproj" />
+  <Project Path="tests/Dharmu.Security.Tests/Dharmu.Security.Tests.csproj" />
 </Solution>
