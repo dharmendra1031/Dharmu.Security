@@ -4,7 +4,7 @@ public interface ILicenseValidator
 {
     LicenseValidationResult Validate(
         string licenseContent,
-        string publicKeyPem,
+        IReadOnlyDictionary<string, string> trustedPublicKeys,
         string expectedProductCode,
         string currentMachineCode,
         DateTime utcNow);
