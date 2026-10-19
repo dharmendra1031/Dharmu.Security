@@ -8,8 +8,8 @@ public sealed class DharmuSecurityOptions
     public TimeSpan ClockRollbackTolerance { get; set; } = TimeSpan.FromMinutes(5);
     public TimeSpan ClockStatePersistInterval { get; set; } = TimeSpan.FromMinutes(5);
 
-    public IDictionary<string, string> TrustedPublicKeys { get; } =
-        new Dictionary<string, string>(StringComparer.Ordinal);
+    public Dictionary<string, string> TrustedPublicKeys { get; } =
+        new(StringComparer.Ordinal);
 
     public IList<string> ExcludedPaths { get; } = new List<string>
     {
