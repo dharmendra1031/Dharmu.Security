@@ -32,3 +32,9 @@ jobs:
 
       - name: Build device tool
         run: dotnet build src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj --configuration Release --no-restore
+
+      - name: Restore secret tool
+        run: dotnet restore src/Dharmu.Security.SecretTool/Dharmu.Security.SecretTool.csproj
+
+      - name: Build secret tool
+        run: dotnet build src/Dharmu.Security.SecretTool/Dharmu.Security.SecretTool.csproj --configuration Release --no-restore
