@@ -12,4 +12,5 @@ public sealed class LicensePayload
     public DateTime ValidFromUtc { get; init; }
     public DateTime? ExpiresAtUtc { get; init; }
     public bool IsLifetime { get; init; }
+    public bool IsRevoked { get; init; }
 }
