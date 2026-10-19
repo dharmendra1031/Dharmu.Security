@@ -21,20 +21,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Restore security package
-        run: dotnet restore src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj
+      - name: Restore solution
+        run: dotnet restore Dharmu.Security.slnx
 
-      - name: Build security package
-        run: dotnet build src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj --configuration Release --no-restore
+      - name: Build solution
+        run: dotnet build Dharmu.Security.slnx --configuration Release --no-restore
 
-      - name: Restore device tool
-        run: dotnet restore src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj
-
-      - name: Build device tool
-        run: dotnet build src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj --configuration Release --no-restore
-
-      - name: Restore secret tool
-        run: dotnet restore src/Dharmu.Security.SecretTool/Dharmu.Security.SecretTool.csproj
-
-      - name: Build secret tool
-        run: dotnet build src/Dharmu.Security.SecretTool/Dharmu.Security.SecretTool.csproj --configuration Release --no-restore
+      - name: Test
+        run: dotnet test tests/Dharmu.Security.Tests/Dharmu.Security.Tests.csproj --configuration Release --no-build --no-restore
