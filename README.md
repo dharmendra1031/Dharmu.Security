@@ -5,13 +5,15 @@ Reusable offline licensing and Windows security components for ASP.NET Core appl
 ## Current development foundation
 
 - ECDSA P-256 signed offline license validation
+- signed offline activation requests with device proof
 - product binding
 - non-exportable Windows CNG device identity
 - optional TPM-backed device identity
 - machine-code generation from the device public key
-- offline activation request generation
 - license start and expiry validation
 - DPAPI protected local secrets
+- DPAPI protected connection-string configuration helper
+- interactive DPAPI secret provisioning tool
 - DPAPI protected trusted-clock runtime state
 - clock rollback detection
 - ASP.NET Core license middleware
@@ -26,6 +28,7 @@ Reusable offline licensing and Windows security components for ASP.NET Core appl
 - `Dharmu.Security.Windows`
 - `Dharmu.Security.AspNetCore`
 - `Dharmu.Security.DeviceTool`
+- `Dharmu.Security.SecretTool`
 
 ## Security boundary
 
@@ -39,7 +42,7 @@ When TPM provisioning is selected, the Windows Platform Crypto Provider is used.
 
 Production database credentials must not be committed to source control.
 
-## Offline activation
+## Offline activation and secrets
 
 See `docs/offline-activation.md`.
 
@@ -47,7 +50,6 @@ See `docs/offline-activation.md`.
 
 - real .NET build verification
 - automated tests
-- signed activation-request proof
 - private NuGet package consumption test
 - IIS App Pool key-permission test
 - end-to-end copy-to-second-machine rejection test
