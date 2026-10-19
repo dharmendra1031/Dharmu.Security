@@ -87,6 +87,12 @@ public sealed class EcdsaLicenseValidator : ILicenseValidator
                     LicenseValidationStatus.MachineMismatch);
             }
 
+            if (payload.IsRevoked)
+            {
+                return LicenseValidationResult.Invalid(
+                    LicenseValidationStatus.Revoked);
+            }
+
             if (utcNow < payload.ValidFromUtc)
             {
                 return LicenseValidationResult.Invalid(
