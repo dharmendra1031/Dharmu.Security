@@ -43,6 +43,22 @@ It is pinned into the application build and selected by the license `KeyId`.
 The application verifies the license signature, product, device identity, expiry
 and trusted clock state locally. No internet connection is required.
 
+## Offline revocation
+
+A fully offline installation cannot be remotely revoked instantly.
+
+When a license is deactivated in License Manager:
+
+1. Future normal license export and renewal are blocked.
+2. License Manager can export a signed revocation `.lic` file.
+3. The revocation file must be transferred to the customer server.
+4. Replacing the active license with the signed revocation file causes
+   Dharmu.Security to reject the license as revoked.
+
+If the customer never receives or applies the revocation file, the previously
+issued offline license remains usable until its signed expiry date. Use finite
+license periods when ongoing commercial control is required.
+
 ## Protected database connection string
 
 Run on the target Windows server:
