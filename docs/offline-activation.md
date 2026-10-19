@@ -2,7 +2,7 @@
 
 ## Client server
 
-1. Install the application.
+1. Install the application build containing the pinned License Manager public key.
 2. Provision the device identity once:
 
    `Dharmu.Security.DeviceTool.exe`
@@ -35,8 +35,10 @@ Edited or forged activation requests fail device-signature verification.
 ## Client server
 
 1. Copy the signed license file to the configured license path.
-2. Copy the License Manager public signing key to the configured public-key path.
-3. Restart the application.
+2. Restart the application.
+
+The License Manager public verification key is not deployed as an editable file.
+It is pinned into the application build and selected by the license `KeyId`.
 
 The application verifies the license signature, product, device identity, expiry
 and trusted clock state locally. No internet connection is required.
