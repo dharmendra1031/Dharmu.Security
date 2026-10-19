@@ -22,6 +22,12 @@ public static class DharmuSecurityExtensions
                 options => !string.IsNullOrWhiteSpace(options.ProductCode),
                 "ProductCode is required.")
             .Validate(
+                options => options.TrustedPublicKeys.Count > 0 &&
+                           options.TrustedPublicKeys.All(
+                               item => !string.IsNullOrWhiteSpace(item.Key) &&
+                                       !string.IsNullOrWhiteSpace(item.Value)),
+                "At least one trusted public signing key is required.")
+            .Validate(
                 options => options.ClockRollbackTolerance >= TimeSpan.Zero,
                 "ClockRollbackTolerance cannot be negative.")
             .Validate(
