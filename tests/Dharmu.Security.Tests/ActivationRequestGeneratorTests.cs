@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Dharmu.Security.Core.Licensing;
 using Dharmu.Security.Core.Machine;
+using Xunit;
 
 namespace Dharmu.Security.Tests;
 
