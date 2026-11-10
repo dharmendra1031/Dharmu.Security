@@ -5,10 +5,6 @@ on:
   push:
     tags:
       - 'security-v*'
-    branches:
-      - development
-    paths:
-      - '.github/workflows/publish-packages.yml'
 
 permissions:
   contents: read
