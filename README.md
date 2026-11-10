@@ -51,13 +51,27 @@ Production database credentials must not be committed to source control.
 - `docs/integration.md`
 - `docs/offline-activation.md`
 
+## Package verification and private release
+
+The Windows build workflow has passed restore/build, **8/8 unit tests**, assembly packaging, and a clean sample app that restores and compiles against the locally generated NuGet packages.
+
+The package publishing workflow is **release-tag gated**, not triggered by normal development commits. From a reviewed `development` commit, release version `0.1.0` by pushing the matching tag:
+
+```bash
+git checkout development
+git pull --ff-only origin development
+git tag security-v0.1.0
+git push origin security-v0.1.0
+```
+
+Only create the tag after confirming the commit and version. GitHub Actions will validate that the tag matches each project version, rerun build and tests, and publish to **private GitHub Packages** using `GITHUB_TOKEN`. Treat published package versions as immutable. Consuming projects need separately authorized package-read credentials; never commit tokens to source. A successful CI artifact upload alone **does not mean** the private feed has a published package.
+
 ## Still pending verification / hardening
 
-- real .NET build verification
-- automated tests
-- private NuGet package consumption test
+- Published private GitHub Packages feed and authorized cross-repository restore
 - IIS App Pool key-permission test
-- end-to-end copy-to-second-machine rejection test
-- signing-key rotation deployment test
+- End-to-end activation and copy-to-second-machine rejection
+- Signing-key rotation deployment test
+- Offline expiry/grace and permitted read/export enforcement
 
 Development happens on the `development` branch.
