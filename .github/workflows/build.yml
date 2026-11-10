@@ -75,7 +75,18 @@ jobs:
 
           $project = Join-Path $projectDir 'DharmuPackageSmoke.csproj'
           $packages = Join-Path $PWD 'artifacts'
-          dotnet restore $project --source $packages --source https://api.nuget.org/v3/index.json
+          $config = Join-Path $projectDir 'NuGet.Config'
+          @"
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="packages" value="$packages" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          "@ | Set-Content $config
+
+          dotnet restore $project --configfile $config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build $project --configuration Release --no-restore
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
