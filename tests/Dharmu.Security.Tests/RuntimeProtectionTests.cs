@@ -1,3 +1,7 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Dharmu.Security.Windows.Secrets;
 using Dharmu.Security.AspNetCore;
 using Dharmu.Security.AspNetCore.Licensing;
 using Dharmu.Security.Core.Licensing;
@@ -9,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Dharmu.Security.Tests;
 
@@ -17,7 +22,13 @@ public sealed class RuntimeProtectionTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
     private readonly DateTime _now = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    public RuntimeProtectionTests() => Directory.CreateDirectory(_directory);
+    private readonly ITestOutputHelper _output;
+
+    public RuntimeProtectionTests(ITestOutputHelper output)
+    {
+        _output = output;
+        Directory.CreateDirectory(_directory);
+    }
 
     [Fact]
     public async Task DeletedRuntimeState_IsRejectedWhileRunning()
@@ -290,6 +301,81 @@ public sealed class RuntimeProtectionTests : IDisposable
             CreateGuard(new TestProtector()), CreateOptions(), CreateEnvironment());
         Assert.Equal(allowed ? 1 : 0, calls);
         Assert.Equal(allowed ? 200 : 403, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RuntimePerformanceBaseline_RealSignatureAndDpapi()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var payload = new LicensePayload
+        {
+            SchemaVersion = 2, Revision = 1, LicenseId = 1, ProductCode = "TEST",
+            MachineCode = "TEST", IsLifetime = true, IssuedAtUtc = DateTime.UtcNow.AddDays(-1),
+            ValidFromUtc = DateTime.UtcNow.AddDays(-1)
+        };
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, json);
+        var content = JsonSerializer.Serialize(new LicenseEnvelope
+        {
+            Algorithm = "ECDSA-P256-SHA256", KeyId = "benchmark",
+            Payload = Convert.ToBase64String(bytes),
+            Signature = Convert.ToBase64String(key.SignData(bytes, HashAlgorithmName.SHA256))
+        }, json);
+        await File.WriteAllTextAsync(Path.Combine(_directory, "license.lic"), content);
+        var options = CreateOptions();
+        options.Value.TrustedPublicKeys["benchmark"] = key.ExportSubjectPublicKeyInfoPem();
+        var environment = CreateEnvironment();
+        var guard = new LicenseClockGuard(new DpapiSecretProtector(), options, environment);
+        var validator = new EcdsaLicenseValidator();
+        var machine = new TestMachine();
+        var accepted = 0;
+        var middleware = new LicenseMiddleware(_ =>
+        {
+            Interlocked.Increment(ref accepted);
+            return Task.CompletedTask;
+        }, NullLogger<LicenseMiddleware>.Instance);
+
+        async Task<double> MeasureAsync()
+        {
+            var context = new DefaultHttpContext();
+            context.Request.Method = "GET";
+            context.Request.Path = "/protected";
+            var started = Stopwatch.GetTimestamp();
+            await middleware.InvokeAsync(context, validator, machine, guard, options, environment);
+            var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            Assert.Equal(200, context.Response.StatusCode);
+            return elapsed;
+        }
+
+        var cold = await MeasureAsync();
+        var sequential = new double[200];
+        for (var n = 0; n < sequential.Length; n++)
+        {
+            sequential[n] = await MeasureAsync();
+        }
+
+        var concurrent = new double[200];
+        var total = Stopwatch.StartNew();
+        await Parallel.ForEachAsync(Enumerable.Range(0, concurrent.Length),
+            new ParallelOptions { MaxDegreeOfParallelism = 8 }, async (n, _) =>
+            {
+                concurrent[n] = await MeasureAsync();
+            });
+        total.Stop();
+        Assert.Equal(401, accepted);
+        Assert.True(File.Exists(Path.Combine(_directory, "runtime.state")));
+        _output.WriteLine(FormattableString.Invariant($"SECURITY_BENCH cold_ms={cold:F3}"));
+        Report("sequential", sequential);
+        Report("concurrent8", concurrent);
+        _output.WriteLine(FormattableString.Invariant(
+            $"SECURITY_BENCH concurrent8_requests_per_second={concurrent.Length / total.Elapsed.TotalSeconds:F2}"));
+
+        void Report(string name, double[] values)
+        {
+            Array.Sort(values);
+            _output.WriteLine(FormattableString.Invariant(
+                $"SECURITY_BENCH {name} count={values.Length} median_ms={values[values.Length / 2]:F3} p95_ms={values[(int)Math.Ceiling(values.Length * 0.95) - 1]:F3} max_ms={values[^1]:F3}"));
+        }
     }
 
     private LicenseClockGuard CreateGuard(TestProtector protector) =>

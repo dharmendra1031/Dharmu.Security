@@ -241,6 +241,22 @@ public sealed class LicenseIssuerTests : IDisposable
     }
 
     [Fact]
+    public void RenewalAndRevocation_RejectIssuerClockRollbackWithoutChangingLedger()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var device = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        var path = issuer.Issue(new ActivationRequestGenerator(device).Generate("ERP", _now),
+            "ERP", 1, 2, 30, _now);
+        var id = Assert.Single(issuer.List()).LicenseId;
+        var before = File.ReadAllText(path);
+        Assert.Throws<InvalidOperationException>(() => issuer.Renew(id, 30, _now.AddSeconds(-1)));
+        Assert.Throws<InvalidOperationException>(() => issuer.Revoke(id, _now.AddSeconds(-1)));
+        Assert.Equal(before, File.ReadAllText(path));
+        Assert.Single(issuer.History(id));
+    }
+
+    [Fact]
     public void OversizedActivationRequest_IsRejected()
     {
         Assert.Throws<InvalidDataException>(() =>

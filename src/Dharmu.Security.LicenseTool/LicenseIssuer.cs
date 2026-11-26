@@ -163,6 +163,7 @@ public sealed class LicenseIssuer
         ValidateDays(days);
         using var gate = LockLedger();
         var current = Read(id);
+        ValidateIssuerClock(current, utcNow);
         if (current.IsRevoked || current.IsLifetime)
         {
             throw new InvalidOperationException("Revoked or lifetime licenses cannot be renewed.");
@@ -177,19 +178,19 @@ public sealed class LicenseIssuer
     {
         using var gate = LockLedger();
         var current = Read(id);
-        return current.IsRevoked
-            ? LicensePath(id)
-            : SaveRevision(current, Next(current, utcNow, current.ExpiresAtUtc, true));
+        if (current.IsRevoked)
+        {
+            return LicensePath(id);
+        }
+        ValidateIssuerClock(current, utcNow);
+        return SaveRevision(current, Next(current, utcNow, current.ExpiresAtUtc, true));
     }
 
     public string Rotate(long id, DateTime utcNow)
     {
         using var gate = LockLedger();
         var current = Read(id);
-        if (utcNow < current.IssuedAtUtc || utcNow.Kind != DateTimeKind.Utc)
-        {
-            throw new InvalidOperationException("Issuer clock is invalid.");
-        }
+        ValidateIssuerClock(current, utcNow);
 
         var envelope = JsonSerializer.Deserialize<LicenseEnvelope>(File.ReadAllText(LicensePath(id)), Json)
             ?? throw new InvalidDataException("Invalid ledger envelope.");
@@ -388,6 +389,14 @@ public sealed class LicenseIssuer
         new(Path.Combine(_directory, ".issuer.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
     private string LicensePath(long id) => Path.Combine(_directory, id.ToString(CultureInfo.InvariantCulture) + ".lic");
+
+    private static void ValidateIssuerClock(LicensePayload current, DateTime utcNow)
+    {
+        if (utcNow.Kind != DateTimeKind.Utc || utcNow < current.IssuedAtUtc)
+        {
+            throw new InvalidOperationException("Issuer clock is invalid.");
+        }
+    }
 
     private static void ValidateDays(int? days)
     {

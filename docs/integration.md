@@ -90,3 +90,14 @@ Only exact GET/HEAD paths in ExcludedPaths bypass license enforcement.
 Defaults are /license/activation-request and /health. Do not add business
 operations to those paths or treat license protection as user authorization.
 No Redis, database or additional Windows service is needed for this cache.
+
+## Performance baseline
+
+The Windows CI test RuntimePerformanceBaseline_RealSignatureAndDpapi reports
+SECURITY_BENCH lines for cold validation, 200 sequential requests and 200
+requests at concurrency 8. It uses the actual middleware, signed P-256 license,
+DPAPI, runtime state files and locking, with an in-memory HTTP context and a
+fixed test machine code (not a provisioned TPM/CNG key). Timing is diagnostic,
+not a fixed CI threshold. It does not measure IIS, network, SQL Server, POS
+operations, multiple worker processes or physical device provisioning.
+Measure those on the customer deployment before deciding on further caching.
