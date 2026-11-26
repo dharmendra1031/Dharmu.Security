@@ -12,7 +12,7 @@ the customer device key. Use --tpm consistently on supported hardware. Loss
 of this non-exportable key requires a planned trust-key rotation; exporting
 its public PEM is not a private-key backup.
 
-Build on Windows:
+For a command-free local publish, double-click `Publish-Owner-Tool.cmd` from the checked-out repository on the trusted owner workstation (requires the .NET 10 SDK). Select a new output directory under LocalAppData; the executable is never uploaded by CI. Alternatively build on Windows:
 ```powershell
 dotnet publish src/Dharmu.Security.LicenseTool -c Release -r win-x64 --self-contained false
 ```

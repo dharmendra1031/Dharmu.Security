@@ -60,6 +60,11 @@ internal sealed class DeviceSetupForm : Form
 
         var request = Page("2. Device request");
         Add(request, new Label { Text = "For first activation, generate a signed request and send it to the owner. For renewal or an existing request, go directly to License.", AutoSize = true, MaximumSize = new Size(530, 0) });
+        Add(request, Button("Prepare existing or new device keys", () =>
+        {
+            _machine.Text = Program.Provision(_tpm.Checked);
+            _status.Text = "Device identity and secret protection keys provisioned.";
+        }));
         Add(request, Button("Generate signed activation request", GenerateRequest));
         Add(request, new Label { Text = "Machine code", AutoSize = true });
         Add(request, _machine);
