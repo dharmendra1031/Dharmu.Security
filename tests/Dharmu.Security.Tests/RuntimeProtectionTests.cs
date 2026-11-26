@@ -231,6 +231,67 @@ public sealed class RuntimeProtectionTests : IDisposable
         Assert.Equal(1, validator.Calls);
     }
 
+    [Fact]
+    public async Task CachedLicense_RevalidatesWhenTrustedKeyOrProductChanges()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_directory, "license.lic"), "original");
+        var options = CreateOptions();
+        options.Value.TrustedPublicKeys["issuer-v1"] = "first";
+        var validator = new TestValidator(CreateLicense());
+        var machine = new TestMachine();
+        var guard = CreateGuard(new TestProtector());
+        var environment = CreateEnvironment();
+        var middleware = new LicenseMiddleware(_ => Task.CompletedTask,
+            NullLogger<LicenseMiddleware>.Instance);
+        await middleware.InvokeAsync(new DefaultHttpContext(), validator, machine, guard, options, environment);
+        options.Value.TrustedPublicKeys["issuer-v1"] = "changed";
+        await middleware.InvokeAsync(new DefaultHttpContext(), validator, machine, guard, options, environment);
+        Assert.Equal(2, validator.Calls);
+        options.Value.ProductCode = "OTHER";
+        validator.Reject = true;
+        var rejected = new DefaultHttpContext();
+        await middleware.InvokeAsync(rejected, validator, machine, guard, options, environment);
+        Assert.Equal(3, validator.Calls);
+        Assert.Equal(403, rejected.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task OversizedLicense_IsRejectedBeforeValidation()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(_directory, "license.lic"), new byte[64 * 1024 + 1]);
+        var validator = new TestValidator(CreateLicense());
+        var machine = new TestMachine();
+        var middleware = new LicenseMiddleware(_ => throw new InvalidOperationException("Unexpected access"),
+            NullLogger<LicenseMiddleware>.Instance);
+        var rejected = new DefaultHttpContext();
+        await middleware.InvokeAsync(rejected, validator, machine, CreateGuard(new TestProtector()),
+            CreateOptions(), CreateEnvironment());
+        Assert.Equal(403, rejected.Response.StatusCode);
+        Assert.Equal(0, validator.Calls);
+        Assert.Equal(0, machine.Calls);
+    }
+
+    [Theory]
+    [InlineData("GET", "/license/activation-request", true)]
+    [InlineData("GET", "/health", true)]
+    [InlineData("HEAD", "/health", true)]
+    [InlineData("POST", "/health", false)]
+    [InlineData("GET", "/license/admin", false)]
+    [InlineData("GET", "/health/details", false)]
+    public async Task Exclusions_AllowOnlyExactReadOnlyRoutes(string method, string path, bool allowed)
+    {
+        var calls = 0;
+        var middleware = new LicenseMiddleware(_ => { calls++; return Task.CompletedTask; },
+            NullLogger<LicenseMiddleware>.Instance);
+        var context = new DefaultHttpContext();
+        context.Request.Method = method;
+        context.Request.Path = path;
+        await middleware.InvokeAsync(context, new TestValidator(CreateLicense()), new TestMachine(),
+            CreateGuard(new TestProtector()), CreateOptions(), CreateEnvironment());
+        Assert.Equal(allowed ? 1 : 0, calls);
+        Assert.Equal(allowed ? 200 : 403, context.Response.StatusCode);
+    }
+
     private LicenseClockGuard CreateGuard(TestProtector protector) =>
         new(protector, CreateOptions(), CreateEnvironment());
 

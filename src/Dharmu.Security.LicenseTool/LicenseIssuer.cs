@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dharmu.Security.Core.Licensing;
@@ -44,6 +45,26 @@ public sealed class LicenseIssuer
         }
 
         using var gate = LockLedger();
+        foreach (var path in Directory.EnumerateFiles(_directory, "*.lic"))
+        {
+            if (!long.TryParse(Path.GetFileNameWithoutExtension(path), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var existingId) || existingId <= 0 ||
+                !string.Equals(Path.GetFileName(path), Path.GetFileName(LicensePath(existingId)),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Unexpected license ledger filename.");
+            }
+
+            var existing = Read(existingId);
+            if (!existing.IsRevoked &&
+                string.Equals(existing.ProductCode, request.ProductCode, StringComparison.Ordinal) &&
+                string.Equals(existing.MachineCode, request.MachineCode, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"License {existingId} already exists for this product and device. Renew the existing license or explicitly revoke it before replacement.");
+            }
+        }
+
         long id;
         do
         {
@@ -173,7 +194,7 @@ public sealed class LicenseIssuer
     private FileStream LockLedger() =>
         new(Path.Combine(_directory, ".issuer.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
-    private string LicensePath(long id) => Path.Combine(_directory, $"{id}.lic");
+    private string LicensePath(long id) => Path.Combine(_directory, id.ToString(CultureInfo.InvariantCulture) + ".lic");
 
     private static void ValidateDays(int? days)
     {

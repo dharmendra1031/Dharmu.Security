@@ -14,9 +14,9 @@ builder.Services.AddDharmuSecurity(options =>
 {
     options.ProductCode = "ERP";
 
-    options.TrustedPublicKeys["primary"] = """
+    options.TrustedPublicKeys["issuer-v1"] = """
 -----BEGIN PUBLIC KEY-----
-PASTE_THE_LICENSE_MANAGER_PUBLIC_KEY_HERE
+PASTE_THE_STANDALONE_ISSUER_PUBLIC_KEY_HERE
 -----END PUBLIC KEY-----
 """;
 });
@@ -81,6 +81,12 @@ The middleware compares the exact license content on every protected request.
 For an unchanged valid license, expensive signature and device-key checks are
 reused for at most 30 seconds (monotonic elapsed time). License validity dates,
 clock rollback and revocation history remain checked per request. A changed
-license is verified immediately; a missing or invalid file is rejected. Keep
-trusted options fixed for the process lifetime and restart after changing them.
+license is verified immediately; a missing, oversized (over 64 KiB), or
+invalid file is rejected. Trusted key and product changes invalidate cached
+signature results. Configure options before startup and restart after changing
+them; the device provider is selected once by dependency injection.
+
+Only exact GET/HEAD paths in ExcludedPaths bypass license enforcement.
+Defaults are /license/activation-request and /health. Do not add business
+operations to those paths or treat license protection as user authorization.
 No Redis, database or additional Windows service is needed for this cache.

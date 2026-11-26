@@ -2,7 +2,7 @@
 
 ## Client server
 
-1. Install the application build containing the pinned License Manager public key.
+1. Install the application build containing the pinned standalone issuer public key.
 2. Provision the device identity once:
 
    `Dharmu.Security.DeviceTool.exe`
@@ -21,19 +21,17 @@
 
    `/license/activation-request`
 
-5. Move the JSON request to the License Manager using approved offline media.
+5. Move the JSON request to the owner-only License Tool using approved offline media.
 
 The activation request is signed by the client's non-exportable device private key.
 The request includes the device public key, but never the private key.
 
-## License Manager
+## Private License Tool
 
-1. Select the customer license.
-2. Import the activation request.
-3. Verify the activation-request device signature.
-4. Recalculate MachineCode from the supplied device public key.
-5. Verify customer, product, machine and validity.
-6. Export the signed `.lic` file.
+Use the owner-only commands in [private-license-tool.md](private-license-tool.md).
+The issuer authenticates the device request, checks product and machine identity,
+and signs the license using the owner's private key. Copy the resulting signed
+`.lic` file from the ledger without moving the authoritative record.
 
 Edited or forged activation requests fail device-signature verification.
 
@@ -42,7 +40,7 @@ Edited or forged activation requests fail device-signature verification.
 1. Copy the signed license file to the configured license path.
 2. Restart the application.
 
-The License Manager public verification key is not deployed as an editable file.
+The issuer public verification key is not deployed as an editable file.
 It is pinned into the application build and selected by the license `KeyId`.
 
 The application verifies the license signature, product, device identity, expiry
@@ -63,10 +61,10 @@ write interval. Do not advertise fully offline protection as tamper-proof.
 
 A fully offline installation cannot be remotely revoked instantly.
 
-When a license is deactivated in License Manager:
+When a license is revoked with the private tool:
 
-1. Future normal license export and renewal are blocked.
-2. License Manager can export a signed revocation `.lic` file.
+1. Renewal of the revoked ID is blocked.
+2. The private tool saves a signed revocation `.lic` file.
 3. The revocation file must be transferred to the customer server.
 4. Replacing the active license with the signed revocation file and making a
    protected request records the authenticated revocation in local runtime state.
@@ -78,7 +76,7 @@ license periods when ongoing commercial control is required.
 
 ## License revisions and upgrade
 
-New License Manager exports use schema 2 and a positive signed revision.
+The standalone issuer uses schema 2 and a positive signed revision.
 The SDK accepts legacy schema 1 with revision zero until a newer revision has
 been observed for that license ID. Renewals increase the revision; an older
 revision is then rejected. Revocations are terminal for the same license ID.

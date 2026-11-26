@@ -64,6 +64,25 @@ public sealed class LicenseIssuerTests : IDisposable
     }
 
     [Fact]
+    public void DuplicateProductAndDevice_RequiresRenewalOrExplicitRevocation()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var device = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        var generator = new ActivationRequestGenerator(device);
+        var path = issuer.Issue(generator.Generate("ERP", _now), "ERP", 1, 2, 1, _now);
+        Assert.Throws<InvalidOperationException>(() =>
+            issuer.Issue(generator.Generate("ERP", _now.AddDays(2)), "ERP", 3, 2, 30, _now.AddDays(2)));
+        Assert.Single(Directory.GetFiles(_directory, "*.lic"));
+        var otherProduct = issuer.Issue(generator.Generate("POS", _now), "POS", 1, 3, 30, _now);
+        Assert.NotEqual(path, otherProduct);
+        issuer.Revoke(long.Parse(Path.GetFileNameWithoutExtension(path)), _now.AddDays(2));
+        var replacement = issuer.Issue(generator.Generate("ERP", _now.AddDays(2)), "ERP", 1, 2, 30, _now.AddDays(2));
+        Assert.NotEqual(path, replacement);
+        Assert.Equal(3, Directory.GetFiles(_directory, "*.lic").Length);
+    }
+
+    [Fact]
     public void OversizedActivationRequest_IsRejected()
     {
         Assert.Throws<InvalidDataException>(() =>

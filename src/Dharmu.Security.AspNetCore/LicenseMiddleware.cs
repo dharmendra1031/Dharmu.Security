@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Dharmu.Security.AspNetCore.Licensing;
 using Dharmu.Security.Core.Licensing;
 using Dharmu.Security.Core.Machine;
@@ -11,6 +12,8 @@ namespace Dharmu.Security.AspNetCore;
 
 public sealed class LicenseMiddleware
 {
+    private const int MaxLicenseFileBytes = 64 * 1024;
+    private static readonly UTF8Encoding LicenseEncoding = new(false, true);
     private static readonly TimeSpan RevalidationInterval = TimeSpan.FromSeconds(30);
     private readonly object _validationLock = new();
     private CachedLicense? _cachedLicense;
@@ -35,7 +38,7 @@ public sealed class LicenseMiddleware
     {
         var settings = options.Value;
 
-        if (IsExcluded(context.Request.Path, settings.ExcludedPaths))
+        if (IsExcluded(context.Request, settings.ExcludedPaths))
         {
             await _next(context);
             return;
@@ -49,14 +52,13 @@ public sealed class LicenseMiddleware
 
             if (!File.Exists(licensePath))
             {
+                ClearCache();
                 _logger.LogWarning("License file is not configured.");
                 await RejectAsync(context);
                 return;
             }
 
-            var licenseContent = await File.ReadAllTextAsync(
-                licensePath,
-                context.RequestAborted);
+            var licenseContent = await ReadLicenseAsync(licensePath, context.RequestAborted);
 
             var utcNow = DateTime.UtcNow;
 
@@ -95,6 +97,7 @@ public sealed class LicenseMiddleware
         }
         catch (Exception exception)
         {
+            ClearCache();
             _logger.LogError(
                 exception,
                 "License enforcement failed unexpectedly.");
@@ -118,7 +121,13 @@ public sealed class LicenseMiddleware
         {
             var cached = _cachedLicense;
             if (cached is not null &&
-                ReferenceEquals(cached.Settings, settings) &&
+                string.Equals(cached.ProductCode, settings.ProductCode, StringComparison.Ordinal) &&
+                cached.TrustedKeys.Count == settings.TrustedPublicKeys.Count &&
+                cached.TrustedKeys.All(pair => settings.TrustedPublicKeys.TryGetValue(pair.Key, out var key) &&
+                    string.Equals(pair.Value, key, StringComparison.Ordinal)) &&
+                cached.RequireTpm == settings.RequireTpmDeviceIdentity &&
+                ReferenceEquals(cached.Machine, machineIdentityProvider) &&
+                ReferenceEquals(cached.Validator, validator) &&
                 string.Equals(cached.Content, content, StringComparison.Ordinal) &&
                 Stopwatch.GetElapsedTime(cached.ValidatedAt) < RevalidationInterval &&
                 utcNow >= cached.Payload.ValidFromUtc &&
@@ -131,14 +140,18 @@ public sealed class LicenseMiddleware
             // A changed file, failed check or expired cache must never fall back
             // to an earlier successful result.
             _cachedLicense = null;
+            var productCode = settings.ProductCode;
+            var trustedKeys = new Dictionary<string, string>(settings.TrustedPublicKeys, StringComparer.Ordinal);
+            var requireTpm = settings.RequireTpmDeviceIdentity;
             var result = validator.Validate(
-                content, settings.TrustedPublicKeys, settings.ProductCode,
+                content, trustedKeys, productCode,
                 machineIdentityProvider.GetMachineCode(), utcNow);
 
             if (result.IsValid && result.License is { } payload)
             {
                 _cachedLicense = new CachedLicense(
-                    content, settings, payload, Stopwatch.GetTimestamp());
+                    content, productCode, trustedKeys, requireTpm, machineIdentityProvider,
+                    validator, payload, Stopwatch.GetTimestamp());
             }
 
             return result;
@@ -147,17 +160,49 @@ public sealed class LicenseMiddleware
 
     private sealed record CachedLicense(
         string Content,
-        DharmuSecurityOptions Settings,
+        string ProductCode,
+        IReadOnlyDictionary<string, string> TrustedKeys,
+        bool RequireTpm,
+        IMachineIdentityProvider Machine,
+        ILicenseValidator Validator,
         LicensePayload Payload,
         long ValidatedAt);
 
+    private void ClearCache()
+    {
+        lock (_validationLock)
+        {
+            _cachedLicense = null;
+        }
+    }
+
+    private static async Task<string> ReadLicenseAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.Read | FileShare.Delete, 4096, useAsync: true);
+        var length = stream.Length;
+        if (length <= 0 || length > MaxLicenseFileBytes)
+        {
+            throw new InvalidDataException("License file size is invalid.");
+        }
+
+        var bytes = new byte[(int)length];
+        await stream.ReadExactlyAsync(bytes, cancellationToken);
+        if (stream.ReadByte() != -1)
+        {
+            throw new InvalidDataException("License file changed during reading.");
+        }
+
+        var content = LicenseEncoding.GetString(bytes);
+        return content.Length > 0 && content[0] == '\uFEFF' ? content[1..] : content;
+    }
+
     private static bool IsExcluded(
-        PathString path,
+        HttpRequest request,
         IEnumerable<string> excludedPaths) =>
+        (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)) &&
         excludedPaths.Any(excluded =>
-            path.StartsWithSegments(
-                new PathString(excluded),
-                StringComparison.OrdinalIgnoreCase));
+            string.Equals(request.Path.Value, excluded, StringComparison.OrdinalIgnoreCase));
 
     private static string ResolvePath(
         string contentRootPath,

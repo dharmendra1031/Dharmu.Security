@@ -14,7 +14,7 @@ public sealed class DharmuSecurityOptions
 
     public IList<string> ExcludedPaths { get; } = new List<string>
     {
-        "/license",
+        "/license/activation-request",
         "/health"
     };
 }

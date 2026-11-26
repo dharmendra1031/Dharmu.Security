@@ -34,6 +34,13 @@ request, its age and the machine code, then signs a schema 2 license.
 Use one authoritative ledger directory per issuer; protect it against deletion
 and rollback. The ledger contains the latest signed license per random positive
 ID; copy the resulting .lic file to the customer, never move the ledger record.
+Issuing a second non-revoked license for the same product code and machine
+is rejected, even when the original license is expired or a different customer
+ID is entered. Renew it, or explicitly revoke it before authorized replacement.
+The check authenticates existing ledger records under the exclusive lock; keep
+one authoritative ledger. Revocation must still reach the customer to disable
+an older offline license.
+
 Renew/revoke increments its revision. Repeated revocation is idempotent, and a
 revoked ID cannot be renewed. Updates use an exclusive ledger lock and atomic
 file replacement. There is no separate historical audit log in this phase.
