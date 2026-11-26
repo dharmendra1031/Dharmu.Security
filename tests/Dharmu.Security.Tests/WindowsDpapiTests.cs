@@ -16,6 +16,23 @@ public sealed class WindowsDpapiTests
     }
 
     [Fact]
+    public void LegacyDpapiBlob_IsNotAcceptedAsDeviceBoundData()
+    {
+        var legacy = Convert.ToBase64String(ProtectedData.Protect(
+            System.Text.Encoding.UTF8.GetBytes("legacy-test"), null, DataProtectionScope.LocalMachine));
+        Assert.ThrowsAny<CryptographicException>(() => new DpapiSecretProtector().Unprotect(legacy));
+    }
+
+    [Fact]
+    public void LocalMachineProtection_RejectsTamperedWrappedEntropy()
+    {
+        var protector = new DpapiSecretProtector();
+        var bytes = Convert.FromBase64String(protector.Protect("test-only"));
+        bytes[4] ^= 0x80;
+        Assert.ThrowsAny<CryptographicException>(() => protector.Unprotect(Convert.ToBase64String(bytes)));
+    }
+
+    [Fact]
     public void LocalMachineProtection_RejectsTamperedCiphertext()
     {
         var protector = new DpapiSecretProtector();

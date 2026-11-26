@@ -107,3 +107,16 @@ using the newly built NuGet packages, actual Windows software CNG device identit
 DPAPI and standalone issuer CLI. It verifies the complete activation and revocation
 path including a new host instance. The smoke public key is read from a temporary
 test file only; production applications must pin their public keys in code.
+
+## Device-bound protected data format
+
+Run DeviceTool on the target Windows machine before using SecretTool, protected
+connection strings or runtime state. DeviceTool also provisions an independent
+non-exportable software CNG RSA-2048 decryption key, even if the signing identity
+uses TPM. New protected data uses DPAPI with random entropy wrapped using RSA
+OAEP-SHA256. This does not make the software decryption key TPM-backed. Preserve
+the machine keys; restrict their ACLs and do not copy them to another machine.
+Runtime does not create keys or fall back to legacy DPAPI-only data. Existing
+pre-release DPAPI-only values/state need an explicit original-machine migration
+before upgrade; do not delete state to bypass migration. Local tests using the
+real protector require DeviceTool provisioning first, on an isolated test host.

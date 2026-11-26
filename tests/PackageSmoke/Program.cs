@@ -61,6 +61,7 @@ try
         using var client = new HttpClient { BaseAddress = new Uri(target.Urls.Single()) };
         await ExpectAsync(client, "/health", HttpStatusCode.OK);
         await ExpectAsync(client, "/protected", HttpStatusCode.Forbidden);
+        Console.WriteLine("CROSS_MACHINE_LICENSE PASS: distinct CNG identity, MachineMismatch and HTTP 403.");
         var cipher = await File.ReadAllTextAsync(Path.Combine(copyInput, "protected.txt"));
         try
         {
@@ -73,7 +74,6 @@ try
         }
 
         await target.StopAsync();
-        Console.WriteLine("CROSS_MACHINE_LICENSE PASS: distinct CNG identity, MachineMismatch and HTTP 403.");
         return;
     }
 
@@ -106,8 +106,14 @@ try
             File.Copy(publicKeyPath, Path.Combine(copyOutput, "issuer.pem"));
             await File.WriteAllTextAsync(Path.Combine(copyOutput, "license.lic"), original);
             await File.WriteAllTextAsync(Path.Combine(copyOutput, "machine.txt"), machineCode);
-            await File.WriteAllTextAsync(Path.Combine(copyOutput, "protected.txt"),
-                new DpapiSecretProtector().Protect("CI-only non-secret fixture"));
+            var protector = new DpapiSecretProtector();
+            const string fixture = "CI-only non-secret fixture";
+            var protectedFixture = protector.Protect(fixture);
+            if (protector.Unprotect(protectedFixture) != fixture)
+            {
+                throw new InvalidOperationException("Source protected data round trip failed.");
+            }
+            await File.WriteAllTextAsync(Path.Combine(copyOutput, "protected.txt"), protectedFixture);
         }
 
         await RunToolAsync(issuerTool!, "--key-slot", keySlot, "revoke", ledger,

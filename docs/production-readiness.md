@@ -6,9 +6,20 @@
   owner ledger and provisioning tools are not runtime package dependencies.
 - Keep license and state files outside public static-file paths. Use restrictive
   NTFS ACLs for the IIS identity; the issuer must not run under that identity.
-- DPAPI LocalMachine is machine-scoped, not a per-user authorization boundary.
-  A local account with blob access can potentially decrypt it on that machine.
-  Local administrators can also replace application code or roll back state.
+- A raw DPAPI LocalMachine fixture unexpectedly decrypted on the second Windows
+  runner in run 45777468023, despite distinct CNG signing identities. Root cause
+  is not established. New protected data uses random DPAPI entropy encrypted
+  with a separately provisioned non-exportable software CNG RSA key. This adds
+  independent key possession to decryption; it is not TPM attestation or a
+  per-user authorization boundary. Restrict access to both machine keys.
+  A full machine clone including key material, or a local administrator with
+  application/key access, is outside the protection guarantee.
+- The new format rejects old DPAPI-only blobs. Do not delete or reset existing
+  runtime state to upgrade. Before upgrading any existing deployment, obtain
+  an approved original-machine migration preserving all revision/clock records;
+  re-protect connection strings from their original securely held values.
+  No production release has been published, and the automated migration tool
+  remains a prerequisite if pre-release state is already in use.
 - The local initialized marker is not an independent trusted clock. Offline
   revocation and signing-key retirement require delivery to the customer.
 - Software CNG identity is not TPM hardware attestation. Test explicit provider
@@ -32,7 +43,8 @@
    A second independent Windows CI job consumes the exact built runtime NuGet
    packages and copies a disposable test license and DPAPI ciphertext from the
    first runner. It requires a different device identity, explicit MachineMismatch,
-   HTTP 403, and a DPAPI cryptographic failure. Only synthetic data and the
+   HTTP 403, and a cryptographic failure from the device-bound DPAPI protector.
+   Only synthetic data and the
    public verification key cross jobs; no private key or owner ledger is uploaded.
    Both jobs are virtual Windows environments, not IIS or physical TPM hardware.
 2. Review Windows CI diagnostic timing with SECURITY_BENCH markers.

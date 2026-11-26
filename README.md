@@ -13,7 +13,7 @@ Reusable offline licensing and Windows security components for ASP.NET Core appl
 - pinned public signing keys compiled into the application
 - `KeyId` based signing-key selection and rotation support
 - license start and expiry validation
-- DPAPI protected local secrets
+- Device-key-bound DPAPI protected local secrets
 - DPAPI protected connection-string configuration helper
 - interactive DPAPI secret provisioning tool
 - DPAPI protected trusted-clock runtime state

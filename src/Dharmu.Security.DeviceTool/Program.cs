@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Dharmu.Security.Windows.Machine;
+using Dharmu.Security.Windows.Secrets;
 
 if (!OperatingSystem.IsWindows())
 {
@@ -19,7 +20,8 @@ if (CngKey.Exists(
         provider,
         CngKeyOpenOptions.MachineKey))
 {
-    Console.WriteLine("Dharmu.Security device identity already exists.");
+    DpapiSecretProtector.Provision();
+    Console.WriteLine("Dharmu.Security device identity and secret protection key are provisioned.");
     return 0;
 }
 
@@ -44,5 +46,7 @@ Console.WriteLine("Dharmu.Security device identity created.");
 Console.WriteLine($"Provider: {provider.Provider}");
 Console.WriteLine($"Machine code: {machineCode}");
 Console.WriteLine("Private device key is non-exportable.");
+DpapiSecretProtector.Provision();
+Console.WriteLine("Machine secret protection key provisioned.");
 
 return 0;
