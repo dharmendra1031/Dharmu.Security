@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Dharmu.Security.AspNetCore.Licensing;
 using Dharmu.Security.Core.Licensing;
 using Dharmu.Security.Core.Machine;
@@ -10,6 +11,9 @@ namespace Dharmu.Security.AspNetCore;
 
 public sealed class LicenseMiddleware
 {
+    private static readonly TimeSpan RevalidationInterval = TimeSpan.FromSeconds(30);
+    private readonly object _validationLock = new();
+    private CachedLicense? _cachedLicense;
     private readonly RequestDelegate _next;
     private readonly ILogger<LicenseMiddleware> _logger;
 
@@ -56,12 +60,8 @@ public sealed class LicenseMiddleware
 
             var utcNow = DateTime.UtcNow;
 
-            var result = validator.Validate(
-                licenseContent,
-                settings.TrustedPublicKeys,
-                settings.ProductCode,
-                machineIdentityProvider.GetMachineCode(),
-                utcNow);
+            var result = ValidateLicense(
+                licenseContent, validator, machineIdentityProvider, settings, utcNow);
 
             if (result.License is null || (!result.IsValid && result.Status != LicenseValidationStatus.Revoked))
             {
@@ -106,6 +106,50 @@ public sealed class LicenseMiddleware
         // Application exceptions belong to the application's error pipeline.
         await _next(context);
     }
+
+    private LicenseValidationResult ValidateLicense(
+        string content,
+        ILicenseValidator validator,
+        IMachineIdentityProvider machineIdentityProvider,
+        DharmuSecurityOptions settings,
+        DateTime utcNow)
+    {
+        lock (_validationLock)
+        {
+            var cached = _cachedLicense;
+            if (cached is not null &&
+                ReferenceEquals(cached.Settings, settings) &&
+                string.Equals(cached.Content, content, StringComparison.Ordinal) &&
+                Stopwatch.GetElapsedTime(cached.ValidatedAt) < RevalidationInterval &&
+                utcNow >= cached.Payload.ValidFromUtc &&
+                (cached.Payload.IsLifetime ||
+                 (cached.Payload.ExpiresAtUtc is DateTime expiry && utcNow < expiry)))
+            {
+                return LicenseValidationResult.Valid(cached.Payload);
+            }
+
+            // A changed file, failed check or expired cache must never fall back
+            // to an earlier successful result.
+            _cachedLicense = null;
+            var result = validator.Validate(
+                content, settings.TrustedPublicKeys, settings.ProductCode,
+                machineIdentityProvider.GetMachineCode(), utcNow);
+
+            if (result.IsValid && result.License is { } payload)
+            {
+                _cachedLicense = new CachedLicense(
+                    content, settings, payload, Stopwatch.GetTimestamp());
+            }
+
+            return result;
+        }
+    }
+
+    private sealed record CachedLicense(
+        string Content,
+        DharmuSecurityOptions Settings,
+        LicensePayload Payload,
+        long ValidatedAt);
 
     private static bool IsExcluded(
         PathString path,

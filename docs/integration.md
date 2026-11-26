@@ -69,3 +69,13 @@ Store the returned value under:
 `ProtectedConnectionStrings:DefaultConnection`
 
 Do not keep the plaintext production connection string in appsettings files.
+
+## Runtime performance
+
+The middleware compares the exact license content on every protected request.
+For an unchanged valid license, expensive signature and device-key checks are
+reused for at most 30 seconds (monotonic elapsed time). License validity dates,
+clock rollback and revocation history remain checked per request. A changed
+license is verified immediately; a missing or invalid file is rejected. Keep
+trusted options fixed for the process lifetime and restart after changing them.
+No Redis, database or additional Windows service is needed for this cache.

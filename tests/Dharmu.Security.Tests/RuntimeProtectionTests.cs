@@ -112,6 +112,66 @@ public sealed class RuntimeProtectionTests : IDisposable
         Assert.Equal(LicenseClockStatus.Revoked, (await CreateGuard(protector).CheckAsync(CreateLicense(1), _now)).Status);
     }
 
+    [Fact]
+    public async Task UnchangedLicense_ReusesSignatureCheckButChangesAreVerified()
+    {
+        var path = Path.Combine(_directory, "license.lic");
+        await File.WriteAllTextAsync(path, "original");
+        var options = CreateOptions();
+        var validator = new TestValidator(CreateLicense());
+        var machine = new TestMachine();
+        var guard = CreateGuard(new TestProtector());
+        var environment = CreateEnvironment();
+        var calls = 0;
+        var middleware = new LicenseMiddleware(
+            _ => { calls++; return Task.CompletedTask; },
+            NullLogger<LicenseMiddleware>.Instance);
+
+        for (var i = 0; i < 5; i++)
+        {
+            await middleware.InvokeAsync(new DefaultHttpContext(), validator, machine,
+                guard, options, environment);
+        }
+
+        Assert.Equal(5, calls);
+        Assert.Equal(1, validator.Calls);
+        Assert.Equal(1, machine.Calls);
+
+        // Equal-length content changes must also force validation.
+        await File.WriteAllTextAsync(path, "modified");
+        validator.Reject = true;
+        var rejected = new DefaultHttpContext();
+        await middleware.InvokeAsync(rejected, validator, machine, guard, options, environment);
+        Assert.Equal(403, rejected.Response.StatusCode);
+        Assert.Equal(2, validator.Calls);
+        Assert.Equal(5, calls);
+
+        File.Delete(path);
+        var missing = new DefaultHttpContext();
+        await middleware.InvokeAsync(missing, validator, machine, guard, options, environment);
+        Assert.Equal(403, missing.Response.StatusCode);
+        Assert.Equal(5, calls);
+    }
+
+    [Fact]
+    public async Task CachedLicense_DoesNotBypassRuntimeStateLoss()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_directory, "license.lic"), "original");
+        var options = CreateOptions();
+        var validator = new TestValidator(CreateLicense());
+        var machine = new TestMachine();
+        var guard = CreateGuard(new TestProtector());
+        var environment = CreateEnvironment();
+        var middleware = new LicenseMiddleware(_ => Task.CompletedTask,
+            NullLogger<LicenseMiddleware>.Instance);
+        await middleware.InvokeAsync(new DefaultHttpContext(), validator, machine, guard, options, environment);
+        File.Delete(Path.Combine(_directory, "runtime.state"));
+        var rejected = new DefaultHttpContext();
+        await middleware.InvokeAsync(rejected, validator, machine, guard, options, environment);
+        Assert.Equal(403, rejected.Response.StatusCode);
+        Assert.Equal(1, validator.Calls);
+    }
+
     private LicenseClockGuard CreateGuard(TestProtector protector) =>
         new(protector, CreateOptions(), CreateEnvironment());
 
@@ -150,15 +210,28 @@ public sealed class RuntimeProtectionTests : IDisposable
 
     private sealed class TestMachine : IMachineIdentityProvider
     {
-        public string GetMachineCode() => "TEST";
+        public int Calls { get; private set; }
+        public string GetMachineCode()
+        {
+            Calls++;
+            return "TEST";
+        }
         public byte[] ExportPublicKey() => throw new NotSupportedException();
         public byte[] Sign(byte[] data) => throw new NotSupportedException();
     }
 
     private sealed class TestValidator(LicensePayload license) : ILicenseValidator
     {
+        public int Calls { get; private set; }
+        public bool Reject { get; set; }
         public LicenseValidationResult Validate(string licenseContent,
             IReadOnlyDictionary<string, string> trustedPublicKeys, string expectedProductCode,
-            string currentMachineCode, DateTime utcNow) => LicenseValidationResult.Valid(license);
+            string currentMachineCode, DateTime utcNow)
+        {
+            Calls++;
+            return Reject
+                ? LicenseValidationResult.Invalid(LicenseValidationStatus.InvalidSignature)
+                : LicenseValidationResult.Valid(license);
+        }
     }
 }
