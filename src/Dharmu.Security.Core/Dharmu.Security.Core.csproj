@@ -1,10 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>Dharmu.Security.Core</PackageId>
-    <Description>Core offline licensing contracts and validation for Dharmu.Security.</Description>
+    <Description>Core contracts and ECDSA P-256 validation for signed offline software licenses and activation requests on .NET 10.</Description>
+    <PackageTags>licensing;offline;ecdsa;digital-signatures;dotnet</PackageTags>
     <Version>0.2.0</Version>
-    <Authors>Dharmu</Authors>
-    <RepositoryUrl>https://github.com/dharmendra1031/Dharmu.Security</RepositoryUrl>
-    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 </Project>

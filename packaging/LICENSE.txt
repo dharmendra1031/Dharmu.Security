@@ -1,0 +1,28 @@
+Dharmu.Security - Proprietary Software License
+
+Copyright (c) 2026 Dharmendra Gupta. All rights reserved.
+
+This software is proprietary. Downloading or installing a package does not grant
+an unrestricted commercial license or a right to redistribute its contents.
+
+Permission is granted to download, install, and evaluate the software for
+internal non-production testing. Production use, commercial integration,
+distribution as part of another product, and sublicensing require separate
+written permission from the copyright holder. No permission to redistribute
+the standalone library or publish modified versions is granted by this notice.
+Rights that cannot lawfully be restricted remain unaffected.
+
+The package host may store and distribute the original package in accordance
+with its applicable service terms. Third-party dependencies remain subject to
+their respective licenses; this notice does not change those licenses.
+
+THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NONINFRINGEMENT. TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE COPYRIGHT
+HOLDER IS NOT LIABLE FOR DAMAGES ARISING FROM USE OF THE SOFTWARE.
+
+For production or redistribution permission, contact the package owner
+through the NuGet.org package page.
+
+This notice does not replace the separate signed runtime license required
+by applications using Dharmu.Security license enforcement.

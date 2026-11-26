@@ -6,4 +6,20 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Dharmu.Security.Core' Or '$(MSBuildProjectName)' == 'Dharmu.Security.Windows' Or '$(MSBuildProjectName)' == 'Dharmu.Security.AspNetCore'">
+    <Authors>Dharmendra Gupta</Authors>
+    <Copyright>Copyright © 2026 Dharmendra Gupta. All rights reserved.</Copyright>
+    <RepositoryUrl>https://github.com/dharmendra1031/Dharmu.Security</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>Offline licensing, explicit Windows device provisioning, device-key-bound DPAPI protection, revision and revocation checks, and ASP.NET Core integration.</PackageReleaseNotes>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Dharmu.Security.Core' Or '$(MSBuildProjectName)' == 'Dharmu.Security.Windows' Or '$(MSBuildProjectName)' == 'Dharmu.Security.AspNetCore'">
+    <None Include="$(MSBuildThisFileDirectory)packaging/LICENSE.txt" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)packaging/README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)packaging/icon.png" Pack="true" PackagePath="/" />
+  </ItemGroup>
 </Project>

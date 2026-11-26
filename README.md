@@ -75,6 +75,18 @@ git push origin security-v0.2.0
 
 Only create the tag after confirming the commit and version. GitHub Actions validates that the tag matches every project version, calls the same build/test/package-consumption workflow used on development, and publishes only the verified runtime artifacts to GitHub Packages using a scoped `GITHUB_TOKEN`. Confirm private package visibility and authorized restore in GitHub Packages before deploying. The issuer is never a runtime package. Treat published package versions as immutable. Consuming projects need separately authorized package-read credentials; never commit tokens to source. A successful CI artifact upload alone **does not mean** the private feed has a published package.
 
+## NuGet.org public distribution
+
+The runtime packages embed a proprietary license, public package README and icon.
+Review the license terms and copyright ownership before the first public upload.
+After all CI jobs pass, download the runtime-only package artifact for the exact
+approved commit and upload Core, Windows, then AspNetCore to NuGet.org using the
+authorized owner's account. NuGet.org is public; it is not the private feed.
+The existing tag-triggered workflow targets GitHub Packages only and does not
+publish to NuGet.org. Never upload the issuer, tools, test fixtures or keys.
+If a version is already published, increment all three package versions rather
+than trying to overwrite it.
+
 ## Still pending verification / hardening
 
 - Published private GitHub Packages feed and authorized cross-repository restore

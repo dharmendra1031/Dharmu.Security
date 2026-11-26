@@ -94,6 +94,23 @@ jobs:
               $reader = [System.IO.StreamReader]::new($manifest[0].Open())
               try { [xml]$nuspec = $reader.ReadToEnd() } finally { $reader.Dispose() }
               $id = [string]$nuspec.package.metadata.id
+              foreach ($entry in @('LICENSE.txt', 'README.md', 'icon.png')) {
+                if (-not $archive.GetEntry($entry)) { throw "Missing package asset: $id / $entry" }
+              }
+              $metadata = $nuspec.SelectSingleNode("//*[local-name()='metadata']")
+              foreach ($field in @('authors','description','tags','copyright','license','readme','icon')) {
+                $node = $metadata.SelectSingleNode("*[local-name()='$field']")
+                if (-not $node -or [string]::IsNullOrWhiteSpace($node.InnerText)) {
+                  throw "Missing metadata: $id / $field"
+                }
+              }
+              if ($metadata.SelectSingleNode("*[local-name()='license']").InnerText -cne 'LICENSE.txt' -or
+                  $metadata.SelectSingleNode("*[local-name()='license']").GetAttribute('type') -cne 'file' -or
+                  $metadata.SelectSingleNode("*[local-name()='readme']").InnerText -cne 'README.md' -or
+                  $metadata.SelectSingleNode("*[local-name()='icon']").InnerText -cne 'icon.png' -or
+                  $metadata.SelectSingleNode("*[local-name()='requireLicenseAcceptance']").InnerText -ne 'true') {
+                throw "Invalid public package metadata: $id"
+              }
               if ($id -notin $expected) { throw "Unexpected package: $id" }
               $expected = @($expected | Where-Object { $_ -ne $id })
               if ($archive.Entries.FullName -match 'LicenseTool|LicenseIssuer|DeviceTool|SecretTool|\.pfx$|\.p12$|\.key$|\.lic$|\.pem$') {
