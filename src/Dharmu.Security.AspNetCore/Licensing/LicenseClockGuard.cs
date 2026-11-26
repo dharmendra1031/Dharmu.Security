@@ -57,15 +57,23 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
             if (_state is null)
             {
-                _state = new LicenseRuntimeState
+                var initialState = new LicenseRuntimeState
                 {
                     LicenseId = license.LicenseId,
                     ProductCode = license.ProductCode,
                     LastValidatedUtc = utcNow
                 };
 
-                await PersistStateAsync(cancellationToken);
+                // Do not accept an initialized state until its durable write succeeds.
+                await PersistStateAsync(initialState, cancellationToken);
+                _state = initialState;
                 return LicenseClockResult.Valid();
+            }
+
+            // A running process must never silently recreate a lost trusted state.
+            if (!File.Exists(ResolveStatePath()))
+            {
+                return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
             }
 
             if (!string.Equals(
@@ -86,11 +94,12 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
             if (utcNow > _state.LastValidatedUtc)
             {
                 _state.LastValidatedUtc = utcNow;
+            }
 
-                if (utcNow - _lastPersistedUtc >= _options.ClockStatePersistInterval)
-                {
-                    await PersistStateAsync(cancellationToken);
-                }
+            // Retry failed durable writes even when the next request uses the same time.
+            if (_state.LastValidatedUtc - _lastPersistedUtc >= _options.ClockStatePersistInterval)
+            {
+                await PersistStateAsync(_state, cancellationToken);
             }
 
             return LicenseClockResult.Valid();
@@ -138,13 +147,10 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
         }
     }
 
-    private async Task PersistStateAsync(CancellationToken cancellationToken)
+    private async Task PersistStateAsync(
+        LicenseRuntimeState state,
+        CancellationToken cancellationToken)
     {
-        if (_state is null)
-        {
-            return;
-        }
-
         var path = ResolveStatePath();
         var directory = Path.GetDirectoryName(path);
 
@@ -153,7 +159,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
             Directory.CreateDirectory(directory);
         }
 
-        var json = JsonSerializer.Serialize(_state, JsonOptions);
+        var json = JsonSerializer.Serialize(state, JsonOptions);
         var protectedState = _secretProtector.Protect(json);
         var temporaryPath = $"{path}.tmp";
 
@@ -163,7 +169,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
             cancellationToken);
 
         File.Move(temporaryPath, path, overwrite: true);
-        _lastPersistedUtc = _state.LastValidatedUtc;
+        _lastPersistedUtc = state.LastValidatedUtc;
     }
 
     private string ResolveStatePath() =>

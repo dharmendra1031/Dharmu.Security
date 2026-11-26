@@ -43,6 +43,13 @@ It is pinned into the application build and selected by the license `KeyId`.
 The application verifies the license signature, product, device identity, expiry
 and trusted clock state locally. No internet connection is required.
 
+Keep the runtime state file outside web-accessible directories, with write access
+restricted to the application identity. Missing state during a running process
+causes rejection. A new process still cannot distinguish a first activation from
+a deleted or restored state without an independent trusted anchor. DPAPI does not
+provide rollback resistance against a local administrator. Do not advertise
+fully offline clock protection as tamper-proof.
+
 ## Offline revocation
 
 A fully offline installation cannot be remotely revoked instantly.

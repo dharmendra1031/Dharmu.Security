@@ -87,8 +87,6 @@ public sealed class LicenseMiddleware
                 await RejectAsync(context);
                 return;
             }
-
-            await _next(context);
         }
         catch (OperationCanceledException) when (
             context.RequestAborted.IsCancellationRequested)
@@ -102,7 +100,11 @@ public sealed class LicenseMiddleware
                 "License enforcement failed unexpectedly.");
 
             await RejectAsync(context);
+            return;
         }
+
+        // Application exceptions belong to the application's error pipeline.
+        await _next(context);
     }
 
     private static bool IsExcluded(

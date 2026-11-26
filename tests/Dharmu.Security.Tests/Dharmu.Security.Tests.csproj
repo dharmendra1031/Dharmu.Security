@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
@@ -16,5 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Dharmu.Security.Core\Dharmu.Security.Core.csproj" />
+    <ProjectReference Include="..\..\src\Dharmu.Security.AspNetCore\Dharmu.Security.AspNetCore.csproj" />
   </ItemGroup>
 </Project>
