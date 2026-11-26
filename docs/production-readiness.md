@@ -48,9 +48,13 @@
    public verification key cross jobs; no private key or owner ledger is uploaded.
    Both jobs are virtual Windows environments, not IIS or physical TPM hardware.
 2. Review Windows CI diagnostic timing with SECURITY_BENCH markers.
-3. Real IIS deployment with least-privilege ACLs, app-pool recycling and
-   concurrent workers. Test fail-closed behavior on file loss, corrupt state,
-   storage failure and invalid license; verify normal application errors.
+3. A real IIS CI job on a disposable Windows runner provisions an isolated site,
+   installs the official .NET 10 Hosting Bundle, uses an ApplicationPoolIdentity
+   with explicit client-key and state-directory ACLs, and verifies activation,
+   worker recycling, revocation and stale-license rejection. The test uses
+   the same runtime package artifacts as the build. Its result must pass before
+   release. Customer-server testing, concurrent IIS workers, file loss, storage
+   failure and physical TPM ACLs still require deployment acceptance.
 4. Two independent Windows machines: provision keys, generate signed request,
    issue license, reject copied license and DPAPI ciphertext on the other
    machine, exercise renew/revoke and authorized replacement. Test TPM if used.

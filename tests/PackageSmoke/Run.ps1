@@ -1,3 +1,4 @@
+param([switch]$Iis)
 $ErrorActionPreference = 'Stop'
 $projectDir = Join-Path $env:RUNNER_TEMP 'DharmuPackageSmoke'
 New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
@@ -15,7 +16,8 @@ $projectXml = @'
 '@
 $version = ([xml](Get-Content -Raw 'src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj')).Project.PropertyGroup.Version
 $projectXml.Replace('PACKAGE_VERSION', $version) | Set-Content (Join-Path $projectDir 'DharmuPackageSmoke.csproj')
-Copy-Item 'tests/PackageSmoke/Program.cs' (Join-Path $projectDir 'Program.cs')
+$source = if ($Iis) { 'tests/PackageSmoke/IisSite.cs' } else { 'tests/PackageSmoke/Program.cs' }
+Copy-Item $source (Join-Path $projectDir 'Program.cs') -Force
 
 $project = Join-Path $projectDir 'DharmuPackageSmoke.csproj'
 $packages = Join-Path $PWD 'artifacts'
@@ -48,5 +50,9 @@ $env:DHARMU_SMOKE_DEVICE_TOOL = (Resolve-Path 'src/Dharmu.Security.DeviceTool/bi
 if (-not $env:DHARMU_SMOKE_COPY_INPUT) {
   $env:DHARMU_SMOKE_LICENSE_TOOL = (Resolve-Path 'src/Dharmu.Security.LicenseTool/bin/Release/net10.0-windows/Dharmu.Security.LicenseTool.dll').Path
 }
-dotnet run --project $project --configuration Release --no-build --no-restore
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($Iis) {
+  & "$PSScriptRoot/IisAcceptance.ps1" -Project $project
+} else {
+  dotnet run --project $project --configuration Release --no-build --no-restore
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
