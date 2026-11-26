@@ -8,7 +8,13 @@ namespace Dharmu.Security.DeviceTool;
 
 internal sealed class DeviceSetupForm : Form
 {
-    private readonly TextBox _product = new() { Dock = DockStyle.Top, PlaceholderText = "Product code (e.g. SR_CONSTRUCTION)" };
+    private readonly ComboBox _profile = new() { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly TextBox _product = new() { Dock = DockStyle.Top, PlaceholderText = "Exact product code" };
+    private readonly TextBox _folder = new() { Dock = DockStyle.Top, ReadOnly = true };
+    private readonly TextBox _publicKey = new() { Dock = DockStyle.Top, ReadOnly = true, PlaceholderText = "Verified owner public PEM" };
+    private readonly TabControl _steps = new() { Dock = DockStyle.Fill };
+    private readonly Button _back = new() { Text = "Back", AutoSize = true };
+    private readonly Button _next = new() { Text = "Next", AutoSize = true };
     private readonly CheckBox _tpm = new() { AutoSize = true, Text = "Use TPM (must match application configuration)" };
     private readonly TextBox _machine = new() { Dock = DockStyle.Top, ReadOnly = true };
     private readonly TextBox _secret = new() { Dock = DockStyle.Top, UseSystemPasswordChar = true, PlaceholderText = "Database connection string or secret" };
@@ -17,36 +23,63 @@ internal sealed class DeviceSetupForm : Form
 
     public DeviceSetupForm()
     {
-        Text = "Dharmu Security — Device Setup";
+        Text = "Dharmu Security — License Setup Wizard";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 590);
-        MinimumSize = new Size(540, 600);
+        ClientSize = new Size(640, 460);
+        MinimumSize = new Size(580, 440);
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.White;
         ForeColor = Color.Black;
-        var layout = new TableLayoutPanel
+
+        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 2, 8, 2) };
+        footer.Controls.Add(_next);
+        footer.Controls.Add(_back);
+        var statusPanel = new Panel { Dock = DockStyle.Bottom, Height = 62, Padding = new Padding(12) };
+        statusPanel.Controls.Add(_status);
+        _status.Dock = DockStyle.Fill;
+        Controls.Add(_steps);
+        Controls.Add(statusPanel);
+        Controls.Add(footer);
+
+        var setup = Page("1. Setup");
+        Add(setup, new Label { Text = $"Computer: {Environment.MachineName}", AutoSize = true });
+        Add(setup, new Label { Text = "Choose the deployed product", AutoSize = true });
+        _profile.Items.AddRange(new object[] { "SR Construction", "Other product" });
+        Add(setup, _profile);
+        Add(setup, _product);
+        Add(setup, _tpm);
+        Add(setup, new Label { Text = "License directory (outside web root)", AutoSize = true });
+        Add(setup, _folder);
+        var browseFolder = Button("Choose custom directory", () =>
         {
-            Dock = DockStyle.Fill, Padding = new Padding(18), ColumnCount = 1,
-            AutoScroll = true, AutoSize = false
-        };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        Controls.Add(layout);
-        Add(new Label { Text = "Device & License Setup", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
-        Add(new Label { Text = $"Computer: {Environment.MachineName}", AutoSize = true });
-        Add(_product);
-        Add(_tpm);
-        Add(Button("Prepare device keys", () =>
+            using var dialog = new FolderBrowserDialog { SelectedPath = _folder.Text };
+            if (dialog.ShowDialog(this) == DialogResult.OK) _folder.Text = dialog.SelectedPath;
+        });
+        Add(setup, browseFolder);
+        Add(setup, new Label { Text = "TPM must match the deployed application. Existing keys are retained.", AutoSize = true, MaximumSize = new Size(530, 0) });
+
+        var request = Page("2. Device request");
+        Add(request, new Label { Text = "For first activation, generate a signed request and send it to the owner. For renewal or an existing request, go directly to License.", AutoSize = true, MaximumSize = new Size(530, 0) });
+        Add(request, Button("Generate signed activation request", GenerateRequest));
+        Add(request, new Label { Text = "Machine code", AutoSize = true });
+        Add(request, _machine);
+
+        var license = Page("3. License");
+        Add(license, new Label { Text = "Choose the independently verified owner public key matching the deployed application's compiled key. The selection is reused for this session.", AutoSize = true, MaximumSize = new Size(530, 0) });
+        Add(license, _publicKey);
+        Add(license, Button("Choose verified public key", () =>
         {
-            _machine.Text = Program.Provision(_tpm.Checked);
-            _status.Text = "Device identity and secret protection keys provisioned.";
+            var path = SelectFile("Select verified owner PUBLIC key", "Public key (*.pem)|*.pem");
+            if (path is not null) _publicKey.Text = path;
         }));
-        Add(_machine);
-        Add(Button("Generate signed activation request", GenerateRequest));
-        Add(Button("Import signed license", ImportLicense));
-        Add(Button("Verify installed license file", VerifyLicense));
-        Add(new Label { Text = "Protect a local database secret", AutoSize = true });
-        Add(_secret);
-        Add(Button("Protect secret", () =>
+        Add(license, Button("Import signed license", ImportLicense));
+        Add(license, Button("Verify installed license file", VerifyLicense));
+        Add(license, new Label { Text = "File verification is not application activation. Restart the application and verify protected access and IIS permissions.", AutoSize = true, MaximumSize = new Size(530, 0) });
+
+        var secret = Page("4. Optional secret");
+        Add(secret, new Label { Text = "Protect a local database secret (optional). Plaintext is never written to a file.", AutoSize = true, MaximumSize = new Size(530, 0) });
+        Add(secret, _secret);
+        Add(secret, Button("Protect secret", () =>
         {
             _protected.Clear();
             try
@@ -56,21 +89,59 @@ internal sealed class DeviceSetupForm : Form
             }
             finally { _secret.Clear(); }
         }));
-        Add(_protected);
-        Add(_status);
+        Add(secret, _protected);
+
+        _profile.SelectedIndexChanged += (_, _) =>
+        {
+            var sr = _profile.SelectedIndex == 0;
+            _product.ReadOnly = sr;
+            browseFolder.Visible = !sr;
+            _product.Text = sr ? "SR_CONSTRUCTION" : string.Empty;
+            _folder.Text = sr ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SRConstruction", "License") : string.Empty;
+            _machine.Clear();
+            _publicKey.Clear();
+            _status.Text = "Confirm the deployed product and device provider.";
+        };
+        _profile.SelectedIndex = 0;
         _tpm.CheckedChanged += (_, _) =>
         {
             _machine.Clear();
             _status.Text = "Device provider changed. Verify it matches the deployed application.";
         };
-        _product.TextChanged += (_, _) => _status.Text = "Product changed. Verify the product code before generating or importing.";
-
-        void Add(Control control)
+        _steps.SelectedIndexChanged += (_, _) => UpdateNavigation();
+        _back.Click += (_, _) => { if (_steps.SelectedIndex > 0) _steps.SelectedIndex--; };
+        _next.Click += (_, _) =>
         {
-            control.Margin = new Padding(0, 4, 0, 4);
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.Controls.Add(control, 0, layout.RowCount++);
-        }
+            if (_steps.SelectedIndex == _steps.TabCount - 1) Close();
+            else _steps.SelectedIndex++;
+        };
+        UpdateNavigation();
+    }
+
+    private TableLayoutPanel Page(string title)
+    {
+        var tab = new TabPage(title) { BackColor = Color.White };
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, AutoScroll = true
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        tab.Controls.Add(layout);
+        _steps.TabPages.Add(tab);
+        return layout;
+    }
+
+    private static void Add(TableLayoutPanel layout, Control control)
+    {
+        control.Margin = new Padding(0, 4, 0, 4);
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(control, 0, layout.RowCount++);
+    }
+
+    private void UpdateNavigation()
+    {
+        _back.Enabled = _steps.SelectedIndex > 0;
+        _next.Text = _steps.SelectedIndex == _steps.TabCount - 1 ? "Finish" : "Next";
     }
 
     private Button Button(string text, Action action)
@@ -92,6 +163,7 @@ internal sealed class DeviceSetupForm : Form
     {
         var product = _product.Text.Trim();
         ArgumentException.ThrowIfNullOrWhiteSpace(product);
+        if (product.Length > 50) throw new InvalidDataException("Product code must be at most 50 characters.");
         return product;
     }
 
@@ -106,17 +178,23 @@ internal sealed class DeviceSetupForm : Form
         _status.Text = "Signed request saved. Send this JSON to the owner only.";
     }
 
-    private string? SelectLicenseFolder(string product)
+    private string LicenseFolder()
     {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "Select the configured license directory (outside wwwroot)",
-            UseDescriptionForTitle = true,
-            SelectedPath = product == "SR_CONSTRUCTION"
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SRConstruction", "License")
-                : string.Empty
-        };
-        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.SelectedPath : null;
+        if (string.IsNullOrWhiteSpace(_folder.Text))
+            throw new InvalidOperationException("Select the deployed application's license directory in Setup.");
+        var folder = Path.GetFullPath(_folder.Text);
+        if (folder.Split(Path.DirectorySeparatorChar).Any(part => string.Equals(part, "wwwroot", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("License directory must be outside wwwroot.");
+        if (!Directory.Exists(folder))
+            throw new DirectoryNotFoundException("The configured license directory must be created and secured by the administrator before import.");
+        return folder;
+    }
+
+    private string PublicKey()
+    {
+        if (string.IsNullOrWhiteSpace(_publicKey.Text))
+            throw new InvalidOperationException("Choose the verified owner public key on the License page.");
+        return ReadBounded(_publicKey.Text);
     }
 
     private string? SelectFile(string title, string filter)
@@ -157,15 +235,12 @@ internal sealed class DeviceSetupForm : Form
         var product = ProductCode();
         var source = SelectFile("Select signed license from owner", "License (*.lic)|*.lic");
         if (source is null) return;
-        var pemPath = SelectFile("Select independently verified owner PUBLIC key (same as application pin)", "Public key (*.pem)|*.pem");
-        if (pemPath is null) return;
         var content = ReadBounded(source);
-        var pem = ReadBounded(pemPath);
+        var pem = PublicKey();
         var result = Validate(content, product, pem);
         if (!result.IsValid && result.Status != LicenseValidationStatus.Revoked)
             throw new InvalidDataException($"License rejected: {result.Status}.");
-        var folder = SelectLicenseFolder(product);
-        if (folder is null) return;
+        var folder = LicenseFolder();
         var destination = Path.Combine(folder, "license.lic");
         var warning = result.Status == LicenseValidationStatus.Revoked
             ? "This is a signed revocation. Installing it can disable the application."
@@ -194,11 +269,8 @@ internal sealed class DeviceSetupForm : Form
     private void VerifyLicense()
     {
         var product = ProductCode();
-        var folder = SelectLicenseFolder(product);
-        if (folder is null) return;
-        var pemPath = SelectFile("Select independently verified owner PUBLIC key (same as application pin)", "Public key (*.pem)|*.pem");
-        if (pemPath is null) return;
-        var result = Validate(ReadBounded(Path.Combine(folder, "license.lic")), product, ReadBounded(pemPath));
+        var folder = LicenseFolder();
+        var result = Validate(ReadBounded(Path.Combine(folder, "license.lic")), product, PublicKey());
         _status.Text = $"File check: {result.Status}. Application runtime and IIS permissions must be verified separately.";
     }
 }

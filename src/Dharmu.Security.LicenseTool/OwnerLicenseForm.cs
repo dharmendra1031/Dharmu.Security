@@ -99,7 +99,24 @@ internal sealed class OwnerLicenseForm : Form
     private void ChooseRequest()
     {
         using var dialog = new OpenFileDialog { Filter = "Signed activation request (*.json)|*.json" };
-        if (dialog.ShowDialog(this) == DialogResult.OK) _request.Text = dialog.FileName;
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            using var stream = File.OpenRead(dialog.FileName);
+            if (stream.Length is <= 0 or > 65536)
+                throw new InvalidDataException("Activation request size is invalid.");
+            using var reader = new StreamReader(stream);
+            var request = new ActivationRequestParser().Parse(reader.ReadToEnd(), DateTime.UtcNow);
+            _request.Text = dialog.FileName;
+            if (_operation.SelectedIndex == 0)
+                _product.Text = request.ProductCode;
+            _result.Text = $"Verified device request: {request.ProductCode}{Environment.NewLine}Machine: {request.MachineCode}";
+        }
+        catch (Exception exception)
+        {
+            _request.Clear();
+            _result.Text = $"Request rejected: {exception.Message}";
+        }
     }
 
     private void UpdateFields()
