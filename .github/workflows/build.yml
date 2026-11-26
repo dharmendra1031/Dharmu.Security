@@ -89,21 +89,7 @@ jobs:
           '@
           $version = ([xml](Get-Content -Raw 'src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj')).Project.PropertyGroup.Version
           $projectXml.Replace('PACKAGE_VERSION', $version) | Set-Content (Join-Path $projectDir 'DharmuPackageSmoke.csproj')
-          @'
-          using Dharmu.Security.AspNetCore;
-
-          var builder = WebApplication.CreateBuilder(args);
-          builder.Services.AddDharmuSecurity(options =>
-          {
-              options.ProductCode = "SMOKE";
-              options.TrustedPublicKeys["primary"] = "verification-key-for-compile-test";
-          });
-
-          var app = builder.Build();
-          app.UseDharmuLicenseProtection();
-          app.MapDharmuSecurityEndpoints();
-          app.Run();
-          '@ | Set-Content (Join-Path $projectDir 'Program.cs')
+          Copy-Item 'tests/PackageSmoke/Program.cs' (Join-Path $projectDir 'Program.cs')
 
           $project = Join-Path $projectDir 'DharmuPackageSmoke.csproj'
           $packages = Join-Path $PWD 'artifacts'
@@ -130,6 +116,11 @@ jobs:
           dotnet restore $project --configfile $config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build $project --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $env:DHARMU_SMOKE_DEVICE_TOOL = (Resolve-Path 'src/Dharmu.Security.DeviceTool/bin/Release/net10.0-windows/Dharmu.Security.DeviceTool.dll').Path
+          $env:DHARMU_SMOKE_LICENSE_TOOL = (Resolve-Path 'src/Dharmu.Security.LicenseTool/bin/Release/net10.0-windows/Dharmu.Security.LicenseTool.dll').Path
+          dotnet run --project $project --configuration Release --no-build --no-restore
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload NuGet packages

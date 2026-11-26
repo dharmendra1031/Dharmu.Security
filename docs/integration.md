@@ -101,3 +101,9 @@ fixed test machine code (not a provisioned TPM/CNG key). Timing is diagnostic,
 not a fixed CI threshold. It does not measure IIS, network, SQL Server, POS
 operations, multiple worker processes or physical device provisioning.
 Measure those on the customer deployment before deciding on further caching.
+
+The isolated package consumption CI also starts a real loopback Kestrel host
+using the newly built NuGet packages, actual Windows software CNG device identity,
+DPAPI and standalone issuer CLI. It verifies the complete activation and revocation
+path including a new host instance. The smoke public key is read from a temporary
+test file only; production applications must pin their public keys in code.
