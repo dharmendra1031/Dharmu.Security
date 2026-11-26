@@ -29,7 +29,12 @@
    The packaged Kestrel smoke test also exercises real software CNG provisioning,
    the standalone issuer CLI, activation download, access denial before issue,
    successful licensed access, revocation, stale file rejection and host restart.
-   It runs on a disposable Windows CI runner, not on IIS or physical TPM hardware.
+   A second independent Windows CI job consumes the exact built runtime NuGet
+   packages and copies a disposable test license and DPAPI ciphertext from the
+   first runner. It requires a different device identity, explicit MachineMismatch,
+   HTTP 403, and a DPAPI cryptographic failure. Only synthetic data and the
+   public verification key cross jobs; no private key or owner ledger is uploaded.
+   Both jobs are virtual Windows environments, not IIS or physical TPM hardware.
 2. Review Windows CI diagnostic timing with SECURITY_BENCH markers.
 3. Real IIS deployment with least-privilege ACLs, app-pool recycling and
    concurrent workers. Test fail-closed behavior on file loss, corrupt state,

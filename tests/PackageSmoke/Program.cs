@@ -4,6 +4,9 @@ using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using Dharmu.Security.AspNetCore;
+using Dharmu.Security.Core.Licensing;
+using Dharmu.Security.Windows.Machine;
+using Dharmu.Security.Windows.Secrets;
 
 var root = Path.Combine(Path.GetTempPath(), "DharmuPackageSmoke-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -15,18 +18,64 @@ var statePath = Path.Combine(root, "runtime.state");
 var keySlot = "smoke-" + Guid.NewGuid().ToString("N");
 var deviceTool = Environment.GetEnvironmentVariable("DHARMU_SMOKE_DEVICE_TOOL")
     ?? throw new InvalidOperationException("Device tool path is required.");
-var issuerTool = Environment.GetEnvironmentVariable("DHARMU_SMOKE_LICENSE_TOOL")
-    ?? throw new InvalidOperationException("Issuer tool path is required.");
+var copyInput = Environment.GetEnvironmentVariable("DHARMU_SMOKE_COPY_INPUT");
+var copyOutput = Environment.GetEnvironmentVariable("DHARMU_SMOKE_COPY_OUTPUT");
+var issuerTool = Environment.GetEnvironmentVariable("DHARMU_SMOKE_LICENSE_TOOL");
 
 try
 {
     await RunToolAsync(deviceTool);
-    await RunToolAsync(issuerTool, "--key-slot", keySlot, "init", publicKeyPath);
+    if (copyInput is null)
+    {
+        await RunToolAsync(issuerTool ?? throw new InvalidOperationException("Issuer tool path is required."),
+            "--key-slot", keySlot, "init", publicKeyPath);
+    }
+    else
+    {
+        File.Copy(Path.Combine(copyInput, "issuer.pem"), publicKeyPath);
+    }
     var pem = await File.ReadAllTextAsync(publicKeyPath);
     using var publicKey = ECDsa.Create();
     publicKey.ImportFromPem(pem);
     var keyId = "issuer-" + Convert.ToHexString(
         SHA256.HashData(publicKey.ExportSubjectPublicKeyInfo())).ToLowerInvariant();
+
+    var machineCode = new WindowsMachineIdentityProvider().GetMachineCode();
+    if (copyInput is not null)
+    {
+        var sourceMachine = await File.ReadAllTextAsync(Path.Combine(copyInput, "machine.txt"));
+        if (string.Equals(sourceMachine, machineCode, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Cross-machine fixture must originate from a different device identity.");
+        }
+
+        File.Copy(Path.Combine(copyInput, "license.lic"), licensePath);
+        var result = new EcdsaLicenseValidator().Validate(await File.ReadAllTextAsync(licensePath),
+            new Dictionary<string, string> { [keyId] = pem }, "SMOKE", machineCode, DateTime.UtcNow);
+        if (result.Status != LicenseValidationStatus.MachineMismatch)
+        {
+            throw new InvalidOperationException($"Expected machine mismatch, got {result.Status}.");
+        }
+
+        await using var target = await StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri(target.Urls.Single()) };
+        await ExpectAsync(client, "/health", HttpStatusCode.OK);
+        await ExpectAsync(client, "/protected", HttpStatusCode.Forbidden);
+        var cipher = await File.ReadAllTextAsync(Path.Combine(copyInput, "protected.txt"));
+        try
+        {
+            _ = new DpapiSecretProtector().Unprotect(cipher);
+            throw new InvalidOperationException("Copied DPAPI test data unexpectedly decrypted.");
+        }
+        catch (CryptographicException)
+        {
+            Console.WriteLine("CROSS_MACHINE_DPAPI PASS");
+        }
+
+        await target.StopAsync();
+        Console.WriteLine("CROSS_MACHINE_LICENSE PASS: distinct CNG identity, MachineMismatch and HTTP 403.");
+        return;
+    }
 
     string original;
     await using (var app = await StartAsync())
@@ -40,7 +89,7 @@ try
             await File.WriteAllTextAsync(requestPath, await response.Content.ReadAsStringAsync());
         }
 
-        await RunToolAsync(issuerTool, "--key-slot", keySlot, "issue", ledger,
+        await RunToolAsync(issuerTool!, "--key-slot", keySlot, "issue", ledger,
             requestPath, "SMOKE", "1", "1", "30");
         var signedFile = Directory.GetFiles(ledger, "*.lic").Single();
         original = await File.ReadAllTextAsync(signedFile);
@@ -51,7 +100,17 @@ try
             throw new InvalidOperationException("Runtime state was not persisted.");
         }
 
-        await RunToolAsync(issuerTool, "--key-slot", keySlot, "revoke", ledger,
+        if (copyOutput is not null)
+        {
+            Directory.CreateDirectory(copyOutput);
+            File.Copy(publicKeyPath, Path.Combine(copyOutput, "issuer.pem"));
+            await File.WriteAllTextAsync(Path.Combine(copyOutput, "license.lic"), original);
+            await File.WriteAllTextAsync(Path.Combine(copyOutput, "machine.txt"), machineCode);
+            await File.WriteAllTextAsync(Path.Combine(copyOutput, "protected.txt"),
+                new DpapiSecretProtector().Protect("CI-only non-secret fixture"));
+        }
+
+        await RunToolAsync(issuerTool!, "--key-slot", keySlot, "revoke", ledger,
             Path.GetFileNameWithoutExtension(signedFile));
         File.Copy(signedFile, licensePath, overwrite: true);
         await ExpectAsync(client, "/protected", HttpStatusCode.Forbidden);
