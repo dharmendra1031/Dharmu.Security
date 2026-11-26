@@ -75,7 +75,7 @@ function Wait-Health([int]$PreviousPid = 0) {
 
 try {
   New-Item -ItemType Directory -Path $publish,$state,$ledger -Force | Out-Null
-  Run-Native 'dotnet' @($env:DHARMU_SMOKE_DEVICE_TOOL)
+  Run-Native 'dotnet' @($env:DHARMU_SMOKE_DEVICE_TOOL, '--provision')
   Run-Native 'dotnet' @($env:DHARMU_SMOKE_LICENSE_TOOL, '--key-slot', $keySlot, 'init', (Join-Path $data 'issuer.pem'))
   Run-Native 'dotnet' @('publish', $Project, '--configuration', 'Release', '--no-build', '--no-restore', '--output', $publish)
   if (-not (Test-Path (Join-Path $publish 'web.config'))) { throw 'IIS publish did not create web.config.' }

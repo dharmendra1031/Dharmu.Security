@@ -24,7 +24,7 @@ var issuerTool = Environment.GetEnvironmentVariable("DHARMU_SMOKE_LICENSE_TOOL")
 
 try
 {
-    await RunToolAsync(deviceTool);
+    await RunToolAsync(deviceTool, "--provision");
     if (copyInput is null)
     {
         await RunToolAsync(issuerTool ?? throw new InvalidOperationException("Issuer tool path is required."),

@@ -47,7 +47,7 @@ that temporarily trusts both the old and new public keys.
 
 Before generating an activation request, provision the machine identity once:
 
-`Dharmu.Security.DeviceTool.exe`
+Open `Dharmu.Security.DeviceTool.exe` and select Prepare device keys, or use `Dharmu.Security.DeviceTool.exe --provision` for automation.
 
 Use `--tpm` on supported Windows hardware when TPM-backed identity is required,
 and set `options.RequireTpmDeviceIdentity = true` in the application. Without

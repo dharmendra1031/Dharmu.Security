@@ -3,13 +3,11 @@
 ## Client server
 
 1. Install the application build containing the pinned standalone issuer public key.
-2. Provision the device identity once:
-
-   `Dharmu.Security.DeviceTool.exe`
+2. Open `Dharmu.Security.DeviceTool.exe` as a local administrator. Enter the exact product code and select Prepare device keys or Generate signed activation request. The GUI uses the same existing keys and never exports private keys. For unattended provisioning use `Dharmu.Security.DeviceTool.exe --provision`.
 
    Use `--tpm` when the target Windows machine has a usable TPM:
 
-   `Dharmu.Security.DeviceTool.exe --tpm`
+   `Dharmu.Security.DeviceTool.exe --provision --tpm`
 
    Set `options.RequireTpmDeviceIdentity = true` in the application for this
    provisioning mode. The default is software CNG only. Existing TPM installations
@@ -37,7 +35,7 @@ Edited or forged activation requests fail device-signature verification.
 
 ## Client server
 
-1. Copy the signed license file to the configured license path.
+1. In the Device Tool choose Import signed license, the independently verified owner public PEM matching the application's compiled pin, and the configured license directory. The tool checks the signed file before replacing license.lic. It does not modify runtime state. Alternatively copy the signed license file manually.
 2. Restart the application.
 
 The issuer public verification key is not deployed as an editable file.
@@ -94,7 +92,7 @@ or online lease is necessary for stronger anti-rollback guarantees.
 
 ## Protected database connection string
 
-Run on the target Windows server:
+Use Protect secret in the Device Tool GUI, or run on the target Windows server:
 
 `Dharmu.Security.SecretTool.exe`
 

@@ -2,51 +2,59 @@ using System.Security.Cryptography;
 using Dharmu.Security.Windows.Machine;
 using Dharmu.Security.Windows.Secrets;
 
-if (!OperatingSystem.IsWindows())
+namespace Dharmu.Security.DeviceTool;
+
+internal static class Program
 {
-    Console.Error.WriteLine("Device provisioning is supported only on Windows.");
-    return 1;
+    [STAThread]
+    private static int Main(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new DeviceSetupForm());
+            return 0;
+        }
+
+        if (args is not ["--provision"] and not ["--tpm"] and not ["--provision", "--tpm"])
+        {
+            Console.Error.WriteLine("Use --provision [--tpm] for unattended provisioning.");
+            return 1;
+        }
+
+        try
+        {
+            var code = Provision(args.Contains("--tpm"));
+            Console.WriteLine($"Dharmu.Security device and secret protection keys provisioned. Machine code: {code}");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 1;
+        }
+    }
+
+    internal static string Provision(bool useTpm)
+    {
+        var provider = useTpm
+            ? CngProvider.MicrosoftPlatformCryptoProvider
+            : CngProvider.MicrosoftSoftwareKeyStorageProvider;
+
+        if (!CngKey.Exists(WindowsMachineIdentityProvider.DeviceKeyName, provider,
+                CngKeyOpenOptions.MachineKey))
+        {
+            using var created = CngKey.Create(CngAlgorithm.ECDsaP256,
+                WindowsMachineIdentityProvider.DeviceKeyName, new CngKeyCreationParameters
+                {
+                    Provider = provider,
+                    KeyCreationOptions = CngKeyCreationOptions.MachineKey,
+                    ExportPolicy = CngExportPolicies.None,
+                    KeyUsage = CngKeyUsages.Signing
+                });
+        }
+
+        DpapiSecretProtector.Provision();
+        return new WindowsMachineIdentityProvider(useTpm).GetMachineCode();
+    }
 }
-
-var useTpm = args.Any(
-    value => string.Equals(value, "--tpm", StringComparison.OrdinalIgnoreCase));
-
-var provider = useTpm
-    ? CngProvider.MicrosoftPlatformCryptoProvider
-    : CngProvider.MicrosoftSoftwareKeyStorageProvider;
-
-if (CngKey.Exists(
-        WindowsMachineIdentityProvider.DeviceKeyName,
-        provider,
-        CngKeyOpenOptions.MachineKey))
-{
-    DpapiSecretProtector.Provision();
-    Console.WriteLine("Dharmu.Security device identity and secret protection key are provisioned.");
-    return 0;
-}
-
-var creationParameters = new CngKeyCreationParameters
-{
-    Provider = provider,
-    KeyCreationOptions = CngKeyCreationOptions.MachineKey,
-    ExportPolicy = CngExportPolicies.None,
-    KeyUsage = CngKeyUsages.Signing
-};
-
-using var key = CngKey.Create(
-    CngAlgorithm.ECDsaP256,
-    WindowsMachineIdentityProvider.DeviceKeyName,
-    creationParameters);
-
-using var ecdsa = new ECDsaCng(key);
-var publicKey = ecdsa.ExportSubjectPublicKeyInfo();
-var machineCode = Convert.ToHexString(SHA256.HashData(publicKey));
-
-Console.WriteLine("Dharmu.Security device identity created.");
-Console.WriteLine($"Provider: {provider.Provider}");
-Console.WriteLine($"Machine code: {machineCode}");
-Console.WriteLine("Private device key is non-exportable.");
-DpapiSecretProtector.Provision();
-Console.WriteLine("Machine secret protection key provisioned.");
-
-return 0;
