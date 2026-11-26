@@ -28,6 +28,39 @@ jobs:
       - name: Restore solution
         run: dotnet restore Dharmu.Security.slnx
 
+      - name: Audit NuGet dependencies
+        shell: pwsh
+        run: |
+          $output = dotnet list Dharmu.Security.slnx package --vulnerable --include-transitive --format json --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet vulnerability audit failed.' }
+          $report = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop
+          if ($report.version -ne 1 -or $null -eq $report.projects) {
+            throw 'Unexpected NuGet audit report format.'
+          }
+          $findings = @(
+            foreach ($project in $report.projects) {
+              foreach ($framework in $project.frameworks) {
+                foreach ($package in (@($framework.topLevelPackages) + @($framework.transitivePackages))) {
+                  foreach ($vulnerability in $package.vulnerabilities) {
+                    if ($null -ne $vulnerability) {
+                      [pscustomobject]@{
+                        Package = $package.id
+                        Version = $package.resolvedVersion
+                        Severity = $vulnerability.severity
+                        Advisory = $vulnerability.advisoryurl
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          )
+          if ($findings.Count -gt 0) {
+            $findings | Sort-Object Package, Version, Advisory -Unique | Format-Table -AutoSize
+            throw 'Known vulnerable dependencies detected. Review and update before release.'
+          }
+          Write-Host 'NUGET_AUDIT PASS: no known vulnerable direct or transitive packages reported.'
+
       - name: Build solution
         run: dotnet build Dharmu.Security.slnx --configuration Release --no-restore
 

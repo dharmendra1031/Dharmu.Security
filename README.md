@@ -35,8 +35,9 @@ Reusable offline licensing and Windows security components for ASP.NET Core appl
 
 ## Security boundary
 
-The License Manager private signing key is never included in this repository,
-NuGet packages, or customer deployments.
+The standalone issuer's private signing key is never included in this repository,
+NuGet packages, or customer deployments. The legacy License Manager is not
+required by the new standalone system.
 
 The public verification key is not secret, but it is pinned into the compiled
 application instead of being loaded from an editable file next to the publish
@@ -52,10 +53,16 @@ Production database credentials must not be committed to source control.
 - `docs/integration.md`
 - `docs/offline-activation.md`
 - `docs/private-license-tool.md`
+- `docs/production-readiness.md`
+- `docs/sr-construction-pilot.md`
 
 ## Package verification and private release
 
-The earlier 0.1.0 baseline passed restore/build, unit tests, packaging and a sample consumption build. Latest security and issuer changes require a fresh successful Windows CI run before release.
+The 0.2.0 development build at commit 23ab5b64 passed 51 automated tests,
+package inspection, isolated package restore, and real Windows Kestrel
+activation/revocation testing with CNG and DPAPI. See the [CI run](https://github.com/dharmendra1031/Dharmu.Security/actions/runs/45776595291).
+Every subsequent candidate must pass its own CI and deployment acceptance gates.
+No private feed publication is established by this result.
 
 The package publishing workflow is **release-tag gated**, not triggered by normal development commits. From a reviewed `development` commit, release candidate version `0.2.0` only after approval by pushing the matching tag:
 
@@ -72,7 +79,7 @@ Only create the tag after confirming the commit and version. GitHub Actions vali
 
 - Published private GitHub Packages feed and authorized cross-repository restore
 - IIS App Pool key-permission test
-- End-to-end activation and copy-to-second-machine rejection
+- Physical second-machine rejection (single Windows runner activation and revocation already passed)
 - Signing-key rotation deployment test
 - Offline expiry/grace and permitted read/export enforcement
 

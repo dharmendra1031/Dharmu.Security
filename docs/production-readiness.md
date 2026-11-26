@@ -25,7 +25,7 @@
 
 ## Required release gates
 
-1. Build, test, runtime-only package inspection and isolated NuGet restore.
+1. Build, direct/transitive NuGet vulnerability audit, test, runtime-only package inspection and isolated NuGet restore.
    The packaged Kestrel smoke test also exercises real software CNG provisioning,
    the standalone issuer CLI, activation download, access denial before issue,
    successful licensed access, revocation, stale file rejection and host restart.
