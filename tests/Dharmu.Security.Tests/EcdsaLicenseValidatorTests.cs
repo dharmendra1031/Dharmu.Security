@@ -159,6 +159,19 @@ public sealed class EcdsaLicenseValidatorTests
             now);
 
         Assert.Equal(LicenseValidationStatus.Expired, result.Status);
+        Assert.NotNull(result.License);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void InvalidValidityRange_ReturnsInvalidFormat()
+    {
+        using var key = CreateKey();
+        var now = DateTime.UtcNow;
+        var result = _validator.Validate(CreateLicense(key, "ERP", "MACHINE-A",
+            now.AddDays(-1), now.AddDays(-2)), TrustedKeys(key), "ERP", "MACHINE-A", now);
+        Assert.Equal(LicenseValidationStatus.InvalidFormat, result.Status);
+        Assert.Null(result.License);
     }
 
     [Fact]

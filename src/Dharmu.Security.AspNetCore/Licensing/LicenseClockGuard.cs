@@ -72,7 +72,9 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
             if (!license.IsRevoked &&
                 (utcNow.Add(_options.ClockRollbackTolerance) < license.IssuedAtUtc ||
                  (_state is not null &&
-                  utcNow.Add(_options.ClockRollbackTolerance) < _state.LastValidatedUtc)))
+                  (utcNow.Add(_options.ClockRollbackTolerance) < _state.LastValidatedUtc ||
+                   (!license.IsLifetime && license.ExpiresAtUtc is DateTime expiredAt &&
+                    _state.LastValidatedUtc >= expiredAt && utcNow < expiredAt)))))
             {
                 return LicenseClockResult.Invalid(LicenseClockStatus.RollbackDetected);
             }
@@ -132,7 +134,10 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
                 _state.LastValidatedUtc = utcNow;
             }
 
-            if (_dirty || _state.LastValidatedUtc - _lastPersistedUtc >= _options.ClockStatePersistInterval)
+            // Persist the first observed expiry immediately, even inside the normal write interval.
+            var observedExpiry = !license.IsLifetime && license.ExpiresAtUtc is DateTime expiry &&
+                utcNow >= expiry && _lastPersistedUtc < expiry;
+            if (_dirty || observedExpiry || _state.LastValidatedUtc - _lastPersistedUtc >= _options.ClockStatePersistInterval)
             {
                 _dirty = true;
                 await PersistStateAsync(_state, cancellationToken);
@@ -153,7 +158,9 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
         if (!File.Exists(path))
         {
-            return LicenseClockResult.Valid();
+            return File.Exists(path + ".initialized")
+                ? LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid)
+                : LicenseClockResult.Valid();
         }
 
         try
@@ -172,6 +179,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
                 return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
             }
 
+            EnsureInitializationMarker(path);
             _state = state;
             _lastPersistedUtc = state.LastValidatedUtc;
             return LicenseClockResult.Valid();
@@ -202,14 +210,41 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
         var protectedState = _secretProtector.Protect(json);
         var temporaryPath = $"{path}.tmp";
 
-        await File.WriteAllTextAsync(
-            temporaryPath,
-            protectedState,
-            cancellationToken);
+        try
+        {
+            await using (var stream = new FileStream(temporaryPath, FileMode.Create,
+                FileAccess.Write, FileShare.None, 4096, useAsync: true))
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(protectedState);
+                await stream.WriteAsync(bytes, cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
 
-        File.Move(temporaryPath, path, overwrite: true);
+            File.Move(temporaryPath, path, overwrite: true);
+            EnsureInitializationMarker(path);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
         _lastPersistedUtc = state.LastValidatedUtc;
         _dirty = false;
+    }
+
+    // This local sidecar detects isolated state-file loss, not administrator rollback
+    // of the whole directory. It is deliberately not treated as a trusted hardware anchor.
+    private static void EnsureInitializationMarker(string path)
+    {
+        var marker = path + ".initialized";
+        if (!File.Exists(marker))
+        {
+            using var stream = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            stream.WriteByte(1);
+            stream.Flush(flushToDisk: true);
+        }
     }
 
     private string ResolveStatePath() =>

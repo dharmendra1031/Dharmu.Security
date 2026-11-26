@@ -63,7 +63,7 @@ public sealed class LicenseMiddleware
             var result = ValidateLicense(
                 licenseContent, validator, machineIdentityProvider, settings, utcNow);
 
-            if (result.License is null || (!result.IsValid && result.Status != LicenseValidationStatus.Revoked))
+            if (result.License is null || (!result.IsValid && result.Status is not (LicenseValidationStatus.Revoked or LicenseValidationStatus.Expired)))
             {
                 _logger.LogWarning(
                     "License validation failed with status {Status}.",
@@ -81,8 +81,8 @@ public sealed class LicenseMiddleware
             if (!clockResult.IsValid || !result.IsValid)
             {
                 _logger.LogWarning(
-                    "License clock validation failed with status {Status}.",
-                    clockResult.Status);
+                    "License enforcement rejected license status {LicenseStatus}, clock status {ClockStatus}.",
+                    result.Status, clockResult.Status);
 
                 await RejectAsync(context);
                 return;

@@ -30,6 +30,33 @@ public sealed class RuntimeProtectionTests : IDisposable
     }
 
     [Fact]
+    public async Task DeletedRuntimeState_IsRejectedAfterRestartWhenMarkerRemains()
+    {
+        var protector = new TestProtector();
+        var license = CreateLicense();
+        Assert.True((await CreateGuard(protector).CheckAsync(license, _now)).IsValid);
+        File.Delete(Path.Combine(_directory, "runtime.state"));
+        Assert.Equal(LicenseClockStatus.StateInvalid,
+            (await CreateGuard(protector).CheckAsync(license, _now)).Status);
+    }
+
+    [Fact]
+    public async Task ExpiryObservation_IsPersistedImmediatelyAndCannotRollBackWithinTolerance()
+    {
+        var protector = new TestProtector();
+        var guard = CreateGuard(protector);
+        var license = new LicensePayload
+        {
+            LicenseId = 1, ProductCode = "TEST", IssuedAtUtc = _now.AddDays(-1),
+            ValidFromUtc = _now.AddDays(-1), ExpiresAtUtc = _now.AddMinutes(1)
+        };
+        Assert.True((await guard.CheckAsync(license, _now)).IsValid);
+        Assert.True((await guard.CheckAsync(license, _now.AddMinutes(1))).IsValid);
+        Assert.Equal(LicenseClockStatus.RollbackDetected,
+            (await CreateGuard(protector).CheckAsync(license, _now.AddSeconds(30))).Status);
+    }
+
+    [Fact]
     public async Task FailedFirstWrite_MustBeRetriedBeforeAccepting()
     {
         var protector = new TestProtector { Fail = true };

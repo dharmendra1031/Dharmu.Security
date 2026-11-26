@@ -65,7 +65,14 @@ public sealed class EcdsaLicenseValidator : ILicenseValidator
 
             if (payload is null || payload.LicenseId <= 0 ||
                 !((payload.SchemaVersion == 1 && payload.Revision == 0) ||
-                  (payload.SchemaVersion == 2 && payload.Revision > 0)))
+                  (payload.SchemaVersion == 2 && payload.Revision > 0)) ||
+                payload.IssuedAtUtc == default || payload.ValidFromUtc == default ||
+                payload.IssuedAtUtc.Kind != DateTimeKind.Utc ||
+                payload.ValidFromUtc.Kind != DateTimeKind.Utc ||
+                (payload.IsLifetime
+                    ? payload.ExpiresAtUtc.HasValue
+                    : payload.ExpiresAtUtc is not DateTime expiry ||
+                      expiry.Kind != DateTimeKind.Utc || expiry <= payload.ValidFromUtc))
             {
                 return LicenseValidationResult.Invalid(
                     LicenseValidationStatus.InvalidFormat);
@@ -105,8 +112,7 @@ public sealed class EcdsaLicenseValidator : ILicenseValidator
                 (!payload.ExpiresAtUtc.HasValue ||
                  utcNow >= payload.ExpiresAtUtc.Value))
             {
-                return LicenseValidationResult.Invalid(
-                    LicenseValidationStatus.Expired);
+                return new LicenseValidationResult(LicenseValidationStatus.Expired, payload);
             }
 
             return LicenseValidationResult.Valid(payload);

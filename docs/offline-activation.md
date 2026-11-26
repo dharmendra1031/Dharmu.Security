@@ -45,10 +45,14 @@ and trusted clock state locally. No internet connection is required.
 
 Keep the runtime state file outside web-accessible directories, with write access
 restricted to the application identity. Missing state during a running process
-causes rejection. A new process still cannot distinguish a first activation from
-a deleted or restored state without an independent trusted anchor. DPAPI does not
-provide rollback resistance against a local administrator. Do not advertise
-fully offline clock protection as tamper-proof.
+causes rejection. A local .initialized sidecar also detects isolated state-file
+deletion across restarts. Preserve both files during deployment and backup.
+An existing valid state is migrated by creating its marker. The marker is not an
+independent trusted anchor: deletion or rollback of the whole directory remains
+possible for a local administrator. DPAPI does not provide rollback resistance.
+An authenticated expired license updates trusted time without granting access;
+the first observed expiry is persisted immediately, including within the normal
+write interval. Do not advertise fully offline protection as tamper-proof.
 
 ## Offline revocation
 
