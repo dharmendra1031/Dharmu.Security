@@ -13,8 +13,10 @@ public sealed class LicenseIssuer
     private readonly string _directory;
     private readonly ECDsa _key;
     private readonly string _keyId;
+    private readonly Dictionary<string, string> _trustedKeys;
 
-    public LicenseIssuer(string directory, ECDsa key, string keyId)
+    public LicenseIssuer(string directory, ECDsa key, string keyId,
+        IReadOnlyDictionary<string, string>? previousPublicKeys = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyId);
@@ -26,6 +28,19 @@ public sealed class LicenseIssuer
         _directory = Path.GetFullPath(directory);
         _key = key;
         _keyId = keyId;
+        _trustedKeys = previousPublicKeys is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(previousPublicKeys, StringComparer.Ordinal);
+        if (_trustedKeys.TryGetValue(keyId, out var pinned))
+        {
+            using var existing = ECDsa.Create();
+            existing.ImportFromPem(pinned);
+            if (!existing.ExportSubjectPublicKeyInfo().SequenceEqual(key.ExportSubjectPublicKeyInfo()))
+            {
+                throw new InvalidDataException("Signing key does not match the pinned public key for this ID.");
+            }
+        }
+        _trustedKeys[keyId] = key.ExportSubjectPublicKeyInfoPem();
         Directory.CreateDirectory(_directory);
     }
 
@@ -167,6 +182,22 @@ public sealed class LicenseIssuer
             : SaveRevision(current, Next(current, utcNow, current.ExpiresAtUtc, true));
     }
 
+    public string Rotate(long id, DateTime utcNow)
+    {
+        using var gate = LockLedger();
+        var current = Read(id);
+        if (utcNow < current.IssuedAtUtc || utcNow.Kind != DateTimeKind.Utc)
+        {
+            throw new InvalidOperationException("Issuer clock is invalid.");
+        }
+
+        var envelope = JsonSerializer.Deserialize<LicenseEnvelope>(File.ReadAllText(LicensePath(id)), Json)
+            ?? throw new InvalidDataException("Invalid ledger envelope.");
+        return string.Equals(envelope.KeyId, _keyId, StringComparison.Ordinal)
+            ? LicensePath(id)
+            : SaveRevision(current, Next(current, utcNow, current.ExpiresAtUtc, current.IsRevoked));
+    }
+
     public IReadOnlyList<LicensePayload> List(long? customerId = null)
     {
         if (customerId is <= 0)
@@ -302,7 +333,7 @@ public sealed class LicenseIssuer
         // Authenticate the stored record before using any fields for renewal.
         // Validate at the signed start date so expired licenses can be renewed.
         var result = new EcdsaLicenseValidator().Validate(content,
-            new Dictionary<string, string> { [_keyId] = _key.ExportSubjectPublicKeyInfoPem() },
+            _trustedKeys,
             payload.ProductCode, payload.MachineCode, payload.ValidFromUtc);
         if (result.License is not { } verified || verified.LicenseId != id ||
             verified.SchemaVersion != 2 || (!result.IsValid && result.Status != LicenseValidationStatus.Revoked))

@@ -18,5 +18,6 @@
     <ProjectReference Include="..\..\src\Dharmu.Security.Core\Dharmu.Security.Core.csproj" />
     <ProjectReference Include="..\..\src\Dharmu.Security.AspNetCore\Dharmu.Security.AspNetCore.csproj" />
     <ProjectReference Include="../../src/Dharmu.Security.LicenseTool/Dharmu.Security.LicenseTool.csproj" />
+    <ProjectReference Include="../../src/Dharmu.Security.Windows/Dharmu.Security.Windows.csproj" />
   </ItemGroup>
 </Project>

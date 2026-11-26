@@ -138,7 +138,7 @@ public sealed class LicenseIssuerTests : IDisposable
         Assert.Equal(replacementPath, issuer.Replace(original.LicenseId, request, now));
         Assert.Throws<InvalidOperationException>(() => issuer.Replace(original.LicenseId,
             new ActivationRequestGenerator(thirdDevice).Generate("ERP", now), now));
-        var replacement = Assert.Single(issuer.List().Where(item => !item.IsRevoked));
+        var replacement = Assert.Single(issuer.List(), item => !item.IsRevoked);
         Assert.Equal(original.LicenseId, replacement.ReplacesLicenseId);
         Assert.Equal(original.CustomerId, replacement.CustomerId);
         Assert.Equal(original.ProductId, replacement.ProductId);
@@ -185,9 +185,59 @@ public sealed class LicenseIssuerTests : IDisposable
         issuer.Revoke(id, _now);
         Assert.Throws<InvalidDataException>(() => issuer.Replace(id, request, _now));
         issuer.Replace(id, new ActivationRequestGenerator(newDevice).Generate("ERP", _now), _now);
-        var replacement = Assert.Single(issuer.List().Where(item => !item.IsRevoked));
+        var replacement = Assert.Single(issuer.List(), item => !item.IsRevoked);
         Assert.True(replacement.IsLifetime);
         Assert.Null(replacement.ExpiresAtUtc);
+    }
+
+    [Fact]
+    public void Rotation_PreservesEntitlementHistoryAndTerminalRevocation()
+    {
+        using var oldKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var newKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var device = new TestDevice();
+        var oldIssuer = new LicenseIssuer(_directory, oldKey, "issuer-v1");
+        var request = new ActivationRequestGenerator(device).Generate("ERP", _now);
+        var path = oldIssuer.Issue(request, "ERP", 1, 2, 30, _now);
+        var original = Assert.Single(oldIssuer.List());
+        var oldContent = File.ReadAllText(path);
+        var previous = new Dictionary<string, string> { ["issuer-v1"] = oldKey.ExportSubjectPublicKeyInfoPem() };
+        var newIssuer = new LicenseIssuer(_directory, newKey, "issuer-v2", previous);
+        newIssuer.Rotate(original.LicenseId, _now.AddDays(1));
+        var rotated = Assert.Single(newIssuer.List());
+        Assert.Equal(original.LicenseId, rotated.LicenseId);
+        Assert.Equal(original.ExpiresAtUtc, rotated.ExpiresAtUtc);
+        Assert.Equal(original.MachineCode, rotated.MachineCode);
+        Assert.Equal(2L, rotated.Revision);
+        Assert.Equal(path, newIssuer.Rotate(original.LicenseId, _now.AddDays(2)));
+        Assert.Equal(2, newIssuer.History(original.LicenseId).Count);
+        var validator = new EcdsaLicenseValidator();
+        var trusted = new Dictionary<string, string> { ["issuer-v2"] = newKey.ExportSubjectPublicKeyInfoPem() };
+        Assert.True(validator.Validate(File.ReadAllText(path), trusted, "ERP", device.GetMachineCode(), _now.AddDays(1)).IsValid);
+        Assert.Equal(LicenseValidationStatus.UnknownSigningKey, validator.Validate(oldContent,
+            trusted, "ERP", device.GetMachineCode(), _now).Status);
+
+        newIssuer.Revoke(original.LicenseId, _now.AddDays(2));
+        var oldAgain = new LicenseIssuer(_directory, oldKey, "issuer-v1", trusted);
+        oldAgain.Rotate(original.LicenseId, _now.AddDays(3));
+        Assert.True(Assert.Single(oldAgain.List()).IsRevoked);
+        Assert.Throws<InvalidOperationException>(() => oldAgain.Renew(original.LicenseId, 30, _now.AddDays(4)));
+        Assert.Equal(4, oldAgain.History(original.LicenseId).Count);
+    }
+
+    [Fact]
+    public void Rotation_RejectsUnknownPreviousKeyAndConflictingPinnedKey()
+    {
+        using var oldKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var newKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var device = new TestDevice();
+        var oldIssuer = new LicenseIssuer(_directory, oldKey, "issuer-v1");
+        oldIssuer.Issue(new ActivationRequestGenerator(device).Generate("ERP", _now), "ERP", 1, 2, 30, _now);
+        var id = Assert.Single(oldIssuer.List()).LicenseId;
+        var newIssuer = new LicenseIssuer(_directory, newKey, "issuer-v2");
+        Assert.Throws<InvalidDataException>(() => newIssuer.Rotate(id, _now.AddDays(1)));
+        Assert.Throws<InvalidDataException>(() => new LicenseIssuer(_directory, newKey, "issuer-v1",
+            new Dictionary<string, string> { ["issuer-v1"] = oldKey.ExportSubjectPublicKeyInfoPem() }));
     }
 
     [Fact]
