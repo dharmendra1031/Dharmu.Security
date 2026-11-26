@@ -60,7 +60,17 @@ jobs:
               $id = [string]$nuspec.package.metadata.id
               if ($id -notin $expected) { throw "Unexpected package: $id" }
               $expected = @($expected | Where-Object { $_ -ne $id })
-              if ($archive.Entries.FullName -match 'LicenseTool|LicenseIssuer|DeviceTool|SecretTool|\.pfx$|\.p12$|\.key$|\.lic$|\.pem
+              if ($archive.Entries.FullName -match 'LicenseTool|LicenseIssuer|DeviceTool|SecretTool|\.pfx$|\.p12$|\.key$|\.lic$|\.pem$') {
+                throw "Private or provisioning content in runtime package: $id"
+              }
+              if ($nuspec.SelectNodes("//*[local-name()='dependency']") | Where-Object { $_.id -match 'LicenseTool|DeviceTool|SecretTool' }) {
+                throw "Owner or provisioning dependency in runtime package: $id"
+              }
+            } finally { $archive.Dispose() }
+          }
+          if ($expected.Count -ne 0) { throw 'A runtime package is missing.' }
+
+      - name: Verify package consumption
         shell: pwsh
         run: |
           $projectDir = Join-Path $env:RUNNER_TEMP 'DharmuPackageSmoke'
@@ -105,76 +115,18 @@ jobs:
               <add key="packages" value="$packages" />
               <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
             </packageSources>
+            <packageSourceMapping>
+              <packageSource key="packages">
+                <package pattern="Dharmu.Security.*" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
           </configuration>
           "@ | Set-Content $config
 
-          dotnet restore $project --configfile $config
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet build $project --configuration Release --no-restore
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Upload NuGet packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: dharmu-security-packages
-          path: artifacts/*.nupkg
-          if-no-files-found: error
-) {
-                throw "Private or provisioning content in runtime package: $id"
-              }
-              if ($nuspec.SelectNodes("//*[local-name()='dependency']") | Where-Object { $_.id -match 'LicenseTool|DeviceTool|SecretTool' }) {
-                throw "Owner or provisioning dependency in runtime package: $id"
-              }
-            } finally { $archive.Dispose() }
-          }
-          if ($expected.Count -ne 0) { throw 'A runtime package is missing.' }
-
-      - name: Verify package consumption
-        shell: pwsh
-        run: |
-          $projectDir = Join-Path $env:RUNNER_TEMP 'DharmuPackageSmoke'
-          New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
-          @'
-          <Project Sdk="Microsoft.NET.Sdk.Web">
-            <PropertyGroup>
-              <TargetFramework>net10.0-windows</TargetFramework>
-              <ImplicitUsings>enable</ImplicitUsings>
-              <Nullable>enable</Nullable>
-            </PropertyGroup>
-            <ItemGroup>
-              <PackageReference Include="Dharmu.Security.AspNetCore" Version="0.1.0" />
-            </ItemGroup>
-          </Project>
-          '@ | Set-Content (Join-Path $projectDir 'DharmuPackageSmoke.csproj')
-          @'
-          using Dharmu.Security.AspNetCore;
-
-          var builder = WebApplication.CreateBuilder(args);
-          builder.Services.AddDharmuSecurity(options =>
-          {
-              options.ProductCode = "SMOKE";
-              options.TrustedPublicKeys["primary"] = "verification-key-for-compile-test";
-          });
-
-          var app = builder.Build();
-          app.UseDharmuLicenseProtection();
-          app.MapDharmuSecurityEndpoints();
-          app.Run();
-          '@ | Set-Content (Join-Path $projectDir 'Program.cs')
-
-          $project = Join-Path $projectDir 'DharmuPackageSmoke.csproj'
-          $packages = Join-Path $PWD 'artifacts'
-          $config = Join-Path $projectDir 'NuGet.Config'
-          @"
-          <configuration>
-            <packageSources>
-              <clear />
-              <add key="packages" value="$packages" />
-              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-            </packageSources>
-          </configuration>
-          "@ | Set-Content $config
-
+          $env:NUGET_PACKAGES = Join-Path $projectDir 'packages'
           dotnet restore $project --configfile $config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build $project --configuration Release --no-restore
