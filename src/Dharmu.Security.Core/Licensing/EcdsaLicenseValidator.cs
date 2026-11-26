@@ -63,7 +63,9 @@ public sealed class EcdsaLicenseValidator : ILicenseValidator
                 payloadBytes,
                 JsonOptions);
 
-            if (payload is null || payload.SchemaVersion != 1)
+            if (payload is null || payload.LicenseId <= 0 ||
+                !((payload.SchemaVersion == 1 && payload.Revision == 0) ||
+                  (payload.SchemaVersion == 2 && payload.Revision > 0)))
             {
                 return LicenseValidationResult.Invalid(
                     LicenseValidationStatus.InvalidFormat);
@@ -89,8 +91,8 @@ public sealed class EcdsaLicenseValidator : ILicenseValidator
 
             if (payload.IsRevoked)
             {
-                return LicenseValidationResult.Invalid(
-                    LicenseValidationStatus.Revoked);
+                // Only authenticated, product- and machine-matched revocations reach the runtime store.
+                return new LicenseValidationResult(LicenseValidationStatus.Revoked, payload);
             }
 
             if (utcNow < payload.ValidFromUtc)

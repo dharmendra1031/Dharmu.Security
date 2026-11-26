@@ -3,6 +3,7 @@ namespace Dharmu.Security.Core.Licensing;
 public sealed class LicensePayload
 {
     public int SchemaVersion { get; init; } = 1;
+    public long Revision { get; init; }
     public long LicenseId { get; init; }
     public long CustomerId { get; init; }
     public long ProductId { get; init; }

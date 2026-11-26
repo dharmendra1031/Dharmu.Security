@@ -63,7 +63,7 @@ public sealed class LicenseMiddleware
                 machineIdentityProvider.GetMachineCode(),
                 utcNow);
 
-            if (!result.IsValid || result.License is null)
+            if (result.License is null || (!result.IsValid && result.Status != LicenseValidationStatus.Revoked))
             {
                 _logger.LogWarning(
                     "License validation failed with status {Status}.",
@@ -78,7 +78,7 @@ public sealed class LicenseMiddleware
                 utcNow,
                 context.RequestAborted);
 
-            if (!clockResult.IsValid)
+            if (!clockResult.IsValid || !result.IsValid)
             {
                 _logger.LogWarning(
                     "License clock validation failed with status {Status}.",

@@ -211,6 +211,37 @@ public sealed class EcdsaLicenseValidatorTests
             result.Status);
     }
 
+    [Theory]
+    [InlineData(1, 0, true)]
+    [InlineData(2, 1, true)]
+    [InlineData(2, 0, false)]
+    [InlineData(1, 1, false)]
+    [InlineData(3, 1, false)]
+    public void SchemaAndRevision_AreValidated(int schemaVersion, long revision, bool valid)
+    {
+        using var key = CreateKey();
+        var now = DateTime.UtcNow;
+        var result = _validator.Validate(
+            CreateLicense(key, "ERP", "MACHINE-A", now.AddDays(-1), now.AddDays(1),
+                schemaVersion: schemaVersion, revision: revision),
+            TrustedKeys(key), "ERP", "MACHINE-A", now);
+        Assert.Equal(valid, result.IsValid);
+    }
+
+    [Fact]
+    public void SignedExpiredRevocation_ReturnsAuthenticatedPayloadWithoutAccess()
+    {
+        using var key = CreateKey();
+        var now = DateTime.UtcNow;
+        var license = CreateLicense(key, "ERP", "MACHINE-A", now.AddDays(-30), now.AddDays(-1),
+            isRevoked: true, schemaVersion: 2, revision: 3);
+        var result = _validator.Validate(license, TrustedKeys(key), "ERP", "MACHINE-A", now);
+        Assert.False(result.IsValid);
+        Assert.Equal(3L, Assert.IsType<LicensePayload>(result.License).Revision);
+        var mismatch = _validator.Validate(license, TrustedKeys(key), "ERP", "OTHER", now);
+        Assert.Null(mismatch.License);
+    }
+
     private static ECDsa CreateKey() =>
         ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
@@ -227,10 +258,12 @@ public sealed class EcdsaLicenseValidatorTests
         string machineCode,
         DateTime validFromUtc,
         DateTime? expiresAtUtc,
-        bool isRevoked = false)
+        bool isRevoked = false, int schemaVersion = 1, long revision = 0)
     {
         var payload = new LicensePayload
         {
+            SchemaVersion = schemaVersion,
+            Revision = revision,
             LicenseId = 10,
             CustomerId = 20,
             ProductId = 30,

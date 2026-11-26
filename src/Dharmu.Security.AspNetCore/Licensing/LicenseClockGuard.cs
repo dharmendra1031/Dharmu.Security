@@ -18,6 +18,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
     private LicenseRuntimeState? _state;
     private bool _stateLoaded;
+    private bool _dirty;
     private DateTime _lastPersistedUtc;
 
     public LicenseClockGuard(
@@ -39,11 +40,6 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
         try
         {
-            if (utcNow.Add(_options.ClockRollbackTolerance) < license.IssuedAtUtc)
-            {
-                return LicenseClockResult.Invalid(LicenseClockStatus.RollbackDetected);
-            }
-
             if (!_stateLoaded)
             {
                 var loadResult = await LoadStateAsync(cancellationToken);
@@ -55,50 +51,90 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
                 _stateLoaded = true;
             }
 
-            if (_state is null)
+            if (_state is not null)
             {
-                var initialState = new LicenseRuntimeState
+                if ((_lastPersistedUtc != default && !File.Exists(ResolveStatePath())) ||
+                    !string.Equals(_state.ProductCode, license.ProductCode, StringComparison.Ordinal))
                 {
-                    LicenseId = license.LicenseId,
-                    ProductCode = license.ProductCode,
-                    LastValidatedUtc = utcNow
-                };
+                    return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
+                }
 
-                // Do not accept an initialized state until its durable write succeeds.
-                await PersistStateAsync(initialState, cancellationToken);
-                _state = initialState;
-                return LicenseClockResult.Valid();
+                // An unsuccessful revocation or revision write must be retried
+                // before another license can be accepted.
+                if (_dirty)
+                {
+                    await PersistStateAsync(_state, cancellationToken);
+                }
             }
 
-            // A running process must never silently recreate a lost trusted state.
-            if (!File.Exists(ResolveStatePath()))
-            {
-                return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
-            }
-
-            if (!string.Equals(
-                    _state.ProductCode,
-                    license.ProductCode,
-                    StringComparison.Ordinal))
-            {
-                return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
-            }
-
-            if (utcNow.Add(_options.ClockRollbackTolerance) < _state.LastValidatedUtc)
+            // A verified revocation is recorded even if its validity has expired
+            // or the local clock is incorrect. It never grants application access.
+            if (!license.IsRevoked &&
+                (utcNow.Add(_options.ClockRollbackTolerance) < license.IssuedAtUtc ||
+                 (_state is not null &&
+                  utcNow.Add(_options.ClockRollbackTolerance) < _state.LastValidatedUtc)))
             {
                 return LicenseClockResult.Invalid(LicenseClockStatus.RollbackDetected);
             }
 
-            _state.LicenseId = license.LicenseId;
+            if (_state is null)
+            {
+                _state = new LicenseRuntimeState
+                {
+                    ProductCode = license.ProductCode,
+                    LastValidatedUtc = utcNow
+                };
+                _dirty = true;
+            }
+
+            if (!_state.Revisions.TryGetValue(license.LicenseId, out var revision))
+            {
+                revision = new LicenseRevisionState { Revision = license.Revision };
+                _state.Revisions.Add(license.LicenseId, revision);
+                _dirty = true;
+            }
+
+            if (license.IsRevoked)
+            {
+                if (!revision.Revoked || license.Revision > revision.Revision)
+                {
+                    revision.Revoked = true;
+                    revision.Revision = Math.Max(revision.Revision, license.Revision);
+                    _dirty = true;
+                }
+
+                if (_dirty)
+                {
+                    await PersistStateAsync(_state, cancellationToken);
+                }
+
+                return LicenseClockResult.Invalid(LicenseClockStatus.Revoked);
+            }
+
+            if (revision.Revoked)
+            {
+                return LicenseClockResult.Invalid(LicenseClockStatus.Revoked);
+            }
+
+            if (license.Revision < revision.Revision)
+            {
+                return LicenseClockResult.Invalid(LicenseClockStatus.StaleRevision);
+            }
+
+            if (license.Revision > revision.Revision)
+            {
+                revision.Revision = license.Revision;
+                _dirty = true;
+            }
 
             if (utcNow > _state.LastValidatedUtc)
             {
                 _state.LastValidatedUtc = utcNow;
             }
 
-            // Retry failed durable writes even when the next request uses the same time.
-            if (_state.LastValidatedUtc - _lastPersistedUtc >= _options.ClockStatePersistInterval)
+            if (_dirty || _state.LastValidatedUtc - _lastPersistedUtc >= _options.ClockStatePersistInterval)
             {
+                _dirty = true;
                 await PersistStateAsync(_state, cancellationToken);
             }
 
@@ -125,16 +161,19 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
             var protectedState = await File.ReadAllTextAsync(path, cancellationToken);
             var json = _secretProtector.Unprotect(protectedState);
 
-            _state = JsonSerializer.Deserialize<LicenseRuntimeState>(json, JsonOptions)
+            var state = JsonSerializer.Deserialize<LicenseRuntimeState>(json, JsonOptions)
                 ?? throw new InvalidDataException("License runtime state is empty.");
 
-            if (_state.LastValidatedUtc == default ||
-                string.IsNullOrWhiteSpace(_state.ProductCode))
+            if (state.LastValidatedUtc == default ||
+                string.IsNullOrWhiteSpace(state.ProductCode) ||
+                state.Revisions is null ||
+                state.Revisions.Any(x => x.Key <= 0 || x.Value is null || x.Value.Revision < 0))
             {
                 return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
             }
 
-            _lastPersistedUtc = _state.LastValidatedUtc;
+            _state = state;
+            _lastPersistedUtc = state.LastValidatedUtc;
             return LicenseClockResult.Valid();
         }
         catch (Exception exception) when (
@@ -170,6 +209,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
         File.Move(temporaryPath, path, overwrite: true);
         _lastPersistedUtc = state.LastValidatedUtc;
+        _dirty = false;
     }
 
     private string ResolveStatePath() =>

@@ -72,6 +72,46 @@ public sealed class RuntimeProtectionTests : IDisposable
         Assert.Equal("application failure", exception.Message);
     }
 
+    [Fact]
+    public async Task RevisionRollback_IsRejectedAfterRestart()
+    {
+        var protector = new TestProtector();
+        var guard = CreateGuard(protector);
+        Assert.True((await guard.CheckAsync(CreateLicense(), _now)).IsValid);
+        Assert.True((await guard.CheckAsync(CreateLicense(2), _now)).IsValid);
+        guard = CreateGuard(protector);
+        Assert.Equal(LicenseClockStatus.StaleRevision, (await guard.CheckAsync(CreateLicense(1), _now)).Status);
+        Assert.Equal(LicenseClockStatus.StaleRevision, (await guard.CheckAsync(CreateLicense(), _now)).Status);
+        Assert.True((await guard.CheckAsync(CreateLicense(2), _now)).IsValid);
+    }
+
+    [Fact]
+    public async Task Revocation_IsTerminalAfterRestartAndReplacementLicense()
+    {
+        var protector = new TestProtector();
+        var guard = CreateGuard(protector);
+        Assert.True((await guard.CheckAsync(CreateLicense(1), _now)).IsValid);
+        Assert.Equal(LicenseClockStatus.Revoked, (await guard.CheckAsync(CreateLicense(2, true), _now)).Status);
+        guard = CreateGuard(protector);
+        Assert.True((await guard.CheckAsync(CreateLicense(1, id: 2), _now)).IsValid);
+        Assert.Equal(LicenseClockStatus.Revoked, (await guard.CheckAsync(CreateLicense(3), _now)).Status);
+        Assert.Equal(LicenseClockStatus.Revoked, (await guard.CheckAsync(CreateLicense(), _now)).Status);
+    }
+
+    [Fact]
+    public async Task FailedRevocationWrite_BlocksOldLicenseUntilDurable()
+    {
+        var protector = new TestProtector();
+        var guard = CreateGuard(protector);
+        Assert.True((await guard.CheckAsync(CreateLicense(1), _now)).IsValid);
+        protector.Fail = true;
+        await Assert.ThrowsAsync<IOException>(() => guard.CheckAsync(CreateLicense(2, true), _now));
+        await Assert.ThrowsAsync<IOException>(() => guard.CheckAsync(CreateLicense(1), _now));
+        protector.Fail = false;
+        Assert.Equal(LicenseClockStatus.Revoked, (await guard.CheckAsync(CreateLicense(1), _now)).Status);
+        Assert.Equal(LicenseClockStatus.Revoked, (await CreateGuard(protector).CheckAsync(CreateLicense(1), _now)).Status);
+    }
+
     private LicenseClockGuard CreateGuard(TestProtector protector) =>
         new(protector, CreateOptions(), CreateEnvironment());
 
@@ -84,10 +124,11 @@ public sealed class RuntimeProtectionTests : IDisposable
 
     private IHostEnvironment CreateEnvironment() => new TestEnvironment { ContentRootPath = _directory };
 
-    private LicensePayload CreateLicense() => new()
+    private LicensePayload CreateLicense(long revision = 0, bool revoked = false, long id = 1) => new()
     {
-        LicenseId = 1, ProductCode = "TEST", IssuedAtUtc = _now.AddDays(-1),
-        ValidFromUtc = _now.AddDays(-1), IsLifetime = true
+        SchemaVersion = revision == 0 ? 1 : 2, Revision = revision,
+        LicenseId = id, ProductCode = "TEST", IssuedAtUtc = _now.AddDays(-1),
+        ValidFromUtc = _now.AddDays(-1), IsLifetime = true, IsRevoked = revoked
     };
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);

@@ -59,12 +59,28 @@ When a license is deactivated in License Manager:
 1. Future normal license export and renewal are blocked.
 2. License Manager can export a signed revocation `.lic` file.
 3. The revocation file must be transferred to the customer server.
-4. Replacing the active license with the signed revocation file causes
-   Dharmu.Security to reject the license as revoked.
+4. Replacing the active license with the signed revocation file and making a
+   protected request records the authenticated revocation in local runtime state.
+   That license ID is then terminal, including after normal application restart.
 
 If the customer never receives or applies the revocation file, the previously
 issued offline license remains usable until its signed expiry date. Use finite
 license periods when ongoing commercial control is required.
+
+## License revisions and upgrade
+
+New License Manager exports use schema 2 and a positive signed revision.
+The SDK accepts legacy schema 1 with revision zero until a newer revision has
+been observed for that license ID. Renewals increase the revision; an older
+revision is then rejected. Revocations are terminal for the same license ID.
+Issue a new license ID for an authorized replacement. Upgrade the SDK before
+issuing schema 2 files; earlier SDK builds cannot read them.
+
+The revision history is stored in the existing DPAPI-protected runtime state.
+It survives normal restarts but not administrator-controlled deletion or
+restoration of all trusted local state. It requires a single application process
+per state path and restrictive filesystem ACLs. An independent trusted anchor
+or online lease is necessary for stronger anti-rollback guarantees.
 
 ## Protected database connection string
 
