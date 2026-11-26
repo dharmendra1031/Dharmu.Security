@@ -31,6 +31,7 @@ Reusable offline licensing and Windows security components for ASP.NET Core appl
 - `Dharmu.Security.AspNetCore`
 - `Dharmu.Security.DeviceTool`
 - `Dharmu.Security.SecretTool`
+- `Dharmu.Security.LicenseTool` (owner-only, non-packable)
 
 ## Security boundary
 
@@ -50,10 +51,11 @@ Production database credentials must not be committed to source control.
 
 - `docs/integration.md`
 - `docs/offline-activation.md`
+- `docs/private-license-tool.md`
 
 ## Package verification and private release
 
-The Windows build workflow has passed restore/build, **8/8 unit tests**, assembly packaging, and a clean sample app that restores and compiles against the locally generated NuGet packages.
+The earlier 0.1.0 baseline passed restore/build, unit tests, packaging and a sample consumption build. Latest security and issuer changes require a fresh successful Windows CI run before release.
 
 The package publishing workflow is **release-tag gated**, not triggered by normal development commits. From a reviewed `development` commit, release version `0.1.0` by pushing the matching tag:
 

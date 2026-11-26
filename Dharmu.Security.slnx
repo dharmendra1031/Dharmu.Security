@@ -2,6 +2,7 @@
   <Project Path="src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj" />
   <Project Path="src/Dharmu.Security.Core/Dharmu.Security.Core.csproj" />
   <Project Path="src/Dharmu.Security.DeviceTool/Dharmu.Security.DeviceTool.csproj" />
+  <Project Path="src/Dharmu.Security.LicenseTool/Dharmu.Security.LicenseTool.csproj" />
   <Project Path="src/Dharmu.Security.SecretTool/Dharmu.Security.SecretTool.csproj" />
   <Project Path="src/Dharmu.Security.Windows/Dharmu.Security.Windows.csproj" />
   <Project Path="tests/Dharmu.Security.Tests/Dharmu.Security.Tests.csproj" />

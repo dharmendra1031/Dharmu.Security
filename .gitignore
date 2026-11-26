@@ -11,3 +11,7 @@ license/
 *.pfx
 *.p12
 *.key
+*.lic
+*.pem
+*.state
+.issuer.lock
