@@ -35,7 +35,7 @@ Restart-Service W3SVC -Force
 $site = 'DharmuIisAcceptance-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $root = Join-Path "$env:SystemDrive\inetpub" $site
 $publish = Join-Path $root 'site'
-$data = Join-Path $root 'data'
+$data = Join-Path $env:ProgramData ($site + '\data')
 $state = Join-Path $data 'state'
 $ledger = Join-Path $env:RUNNER_TEMP ($site + '-ledger')
 $requestFile = Join-Path $env:RUNNER_TEMP ($site + '-activation.json')
@@ -74,7 +74,8 @@ function Wait-Health([int]$PreviousPid = 0) {
 }
 
 try {
-  New-Item -ItemType Directory -Path $publish,$state,$ledger -Force | Out-Null
+  New-Item -ItemType Directory -Path $publish,$ledger -Force | Out-Null
+  New-Item -ItemType Directory -Path $data -Force | Out-Null
   Run-Native 'dotnet' @($env:DHARMU_SMOKE_DEVICE_TOOL, '--provision')
   Run-Native 'dotnet' @($env:DHARMU_SMOKE_LICENSE_TOOL, '--key-slot', $keySlot, 'init', (Join-Path $data 'issuer.pem'))
   Run-Native 'dotnet' @('publish', $Project, '--configuration', 'Release', '--no-build', '--no-restore', '--output', $publish)
@@ -84,19 +85,12 @@ try {
   $poolCreated = $true
   Run-Native $appcmd @('set', 'apppool', $site, '/managedRuntimeVersion:', '/processModel.maxProcesses:1')
   $sid = ([System.Security.Principal.NTAccount]::new("IIS APPPOOL\$site")).Translate([System.Security.Principal.SecurityIdentifier]).Value
-  # The pool may read site and license; only the state directory is writable.
+  # Use the actual production Device Tool permission path instead of duplicating key ACL logic.
   Run-Native 'icacls.exe' @($root, '/grant', ('*' + $sid + ':(OI)(CI)(RX)'))
-  Run-Native 'icacls.exe' @($state, '/grant', ('*' + $sid + ':(OI)(CI)(M)'))
-  foreach ($name in @('DharmuSecurityDeviceIdentity', 'DharmuSecuritySecretProtection')) {
-    $key = [System.Security.Cryptography.CngKey]::Open(
-      $name, [System.Security.Cryptography.CngProvider]::MicrosoftSoftwareKeyStorageProvider,
-      [System.Security.Cryptography.CngKeyOpenOptions]::MachineKey)
-    try {
-      $keyFile = Join-Path "$env:ProgramData\Microsoft\Crypto\Keys" $key.UniqueName
-      if (-not (Test-Path $keyFile)) { throw "CNG key file missing for $name." }
-      Run-Native 'icacls.exe' @($keyFile, '/grant', ('*' + $sid + ':(R)'))
-    } finally { $key.Dispose() }
-  }
+  Run-Native 'dotnet' @($env:DHARMU_SMOKE_DEVICE_TOOL, '--configure-iis', $site, $data, $state)
+  Run-Native 'dotnet' @($env:DHARMU_SMOKE_DEVICE_TOOL, '--configure-iis', $site, $data, $state)
+  if (-not (Test-Path $state)) { throw 'Device Tool did not create the runtime state directory.' }
+  Write-Host 'IIS_DEVICE_TOOL_ACL PASS: configured twice.'
 
   Run-Native $appcmd @('add', 'site', "/name:$site", '/bindings:http/127.0.0.1:18764:', "/physicalPath:$publish")
   $siteCreated = $true

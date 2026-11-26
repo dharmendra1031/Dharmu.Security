@@ -16,9 +16,23 @@ internal static class Program
             return 0;
         }
 
+        if (args is ["--configure-iis", var pool, var licenseDirectory, var stateDirectory])
+        {
+            try
+            {
+                IisPermissions.Configure(pool, licenseDirectory, stateDirectory);
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(exception.Message);
+                return 1;
+            }
+        }
+
         if (args is not ["--provision"] and not ["--tpm"] and not ["--provision", "--tpm"])
         {
-            Console.Error.WriteLine("Use --provision [--tpm] for unattended provisioning.");
+            Console.Error.WriteLine("Use --provision [--tpm] or --configure-iis <pool> <license-dir> <state-dir> for unattended setup.");
             return 1;
         }
 

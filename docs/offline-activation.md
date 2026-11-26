@@ -3,7 +3,7 @@
 ## Client server
 
 1. Install the application build containing the pinned standalone issuer public key.
-2. Open `Dharmu.Security.DeviceTool.exe` as a local administrator. Select the deployed product in Setup (SR Construction fills the code and directory automatically), then generate the signed activation request on page 2. For renewal, go directly to the License page. The GUI uses the same existing keys and never exports private keys. For unattended provisioning use `Dharmu.Security.DeviceTool.exe --provision`.
+2. Open `Dharmu.Security.DeviceTool.exe` as a local administrator. Select the deployed product in Setup (SR Construction fills the code and directory automatically), then generate the signed activation request on Device request page. For renewal, go directly to the License page. The GUI uses the same existing keys and never exports private keys. For unattended provisioning use `Dharmu.Security.DeviceTool.exe --provision`.
 
    Use `--tpm` when the target Windows machine has a usable TPM:
 
@@ -35,7 +35,7 @@ Edited or forged activation requests fail device-signature verification.
 
 ## Client server
 
-1. On the License page choose the independently verified owner public PEM matching the application's compiled pin once per session, then Import signed license. The Setup page retains the configured license directory. The administrator must first create the directory with appropriate IIS/key permissions. Finish closes the wizard; it does not certify runtime activation. The tool checks the signed file before replacing license.lic. It does not modify runtime state. Alternatively copy the signed license file manually.
+1. On the License page choose the independently verified owner public PEM matching the application's compiled pin once per session, then Import signed license. The Setup page retains the configured license directory. For SR Construction with software CNG and a dedicated ApplicationPoolIdentity pool, prepare the device keys, open IIS permissions, refresh pools, select the actual pool, and apply permissions. The tool creates missing dedicated folders under ProgramData, grants the selected pool read access to the two existing software CNG keys, and grants Modify on the shared license/state folder. Existing ACLs are retained, not audited or tightened. Review access before production; the pool has shared machine-key access and must be trusted. TPM, other products and custom service accounts still require manual configuration. Restart and verify the real IIS worker. Finish closes the wizard; it does not certify runtime activation. The tool checks the signed file before replacing license.lic. It does not modify runtime state. Alternatively copy the signed license file manually.
 2. Restart the application.
 
 The issuer public verification key is not deployed as an editable file.

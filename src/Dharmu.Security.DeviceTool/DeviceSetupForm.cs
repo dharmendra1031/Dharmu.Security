@@ -12,6 +12,7 @@ internal sealed class DeviceSetupForm : Form
     private readonly TextBox _product = new() { Dock = DockStyle.Top, PlaceholderText = "Exact product code" };
     private readonly TextBox _folder = new() { Dock = DockStyle.Top, ReadOnly = true };
     private readonly TextBox _publicKey = new() { Dock = DockStyle.Top, ReadOnly = true, PlaceholderText = "Verified owner public PEM" };
+    private readonly ComboBox _pool = new() { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TabControl _steps = new() { Dock = DockStyle.Fill };
     private readonly Button _back = new() { Text = "Back", AutoSize = true };
     private readonly Button _next = new() { Text = "Next", AutoSize = true };
@@ -69,7 +70,19 @@ internal sealed class DeviceSetupForm : Form
         Add(request, new Label { Text = "Machine code", AutoSize = true });
         Add(request, _machine);
 
-        var license = Page("3. License");
+        var iis = Page("3. IIS permissions");
+        Add(iis, new Label { Text = "For IIS with software CNG only. Select the dedicated application pool. This grants access to the existing machine keys and dedicated license/state directory.", AutoSize = true, MaximumSize = new Size(530, 0) });
+        Add(iis, _pool);
+        Add(iis, Button("Refresh IIS application pools", () =>
+        {
+            _pool.Items.Clear();
+            _pool.Items.AddRange(IisPermissions.ListPools());
+            _status.Text = "Select the pool actually used by this application.";
+        }));
+        Add(iis, Button("Apply IIS permissions", ConfigureIis));
+        Add(iis, new Label { Text = "SR Construction currently stores license and state together, so the pool needs Modify on that dedicated folder. Existing ACLs are preserved; review them and test the actual worker. TPM and custom accounts require manual permissions.", AutoSize = true, MaximumSize = new Size(530, 0) });
+
+        var license = Page("4. License");
         Add(license, new Label { Text = "Choose the independently verified owner public key matching the deployed application's compiled key. The selection is reused for this session.", AutoSize = true, MaximumSize = new Size(530, 0) });
         Add(license, _publicKey);
         Add(license, Button("Choose verified public key", () =>
@@ -81,7 +94,7 @@ internal sealed class DeviceSetupForm : Form
         Add(license, Button("Verify installed license file", VerifyLicense));
         Add(license, new Label { Text = "File verification is not application activation. Restart the application and verify protected access and IIS permissions.", AutoSize = true, MaximumSize = new Size(530, 0) });
 
-        var secret = Page("4. Optional secret");
+        var secret = Page("5. Optional secret");
         Add(secret, new Label { Text = "Protect a local database secret (optional). Plaintext is never written to a file.", AutoSize = true, MaximumSize = new Size(530, 0) });
         Add(secret, _secret);
         Add(secret, Button("Protect secret", () =>
@@ -162,6 +175,22 @@ internal sealed class DeviceSetupForm : Form
             }
         };
         return button;
+    }
+
+    private void ConfigureIis()
+    {
+        if (_tpm.Checked) throw new InvalidOperationException("TPM key permissions require manual configuration.");
+        if (_profile.SelectedIndex != 0)
+            throw new InvalidOperationException("Automatic IIS permissions currently support the verified SR Construction profile only.");
+        if (_pool.SelectedItem is not string pool)
+            throw new InvalidOperationException("Refresh and select the application's dedicated IIS pool.");
+        if (string.IsNullOrWhiteSpace(_folder.Text))
+            throw new InvalidOperationException("Select the configured license directory.");
+        if (MessageBox.Show(this,
+            $"Grant IIS APPPOOL\\{pool} read access to the shared device and secret keys and Modify access to {_folder.Text}? Only select a trusted, dedicated application pool. Existing permissions are retained.",
+            Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        IisPermissions.Configure(pool, _folder.Text, _folder.Text);
+        _status.Text = "ACL commands succeeded. Verify the real IIS worker after restart; existing permissions are not audited.";
     }
 
     private string ProductCode()
