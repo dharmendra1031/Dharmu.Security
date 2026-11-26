@@ -45,23 +45,14 @@ public sealed class LicenseIssuer
         }
 
         using var gate = LockLedger();
-        foreach (var path in Directory.EnumerateFiles(_directory, "*.lic"))
+        foreach (var existing in ReadAll())
         {
-            if (!long.TryParse(Path.GetFileNameWithoutExtension(path), NumberStyles.None,
-                    CultureInfo.InvariantCulture, out var existingId) || existingId <= 0 ||
-                !string.Equals(Path.GetFileName(path), Path.GetFileName(LicensePath(existingId)),
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException("Unexpected license ledger filename.");
-            }
-
-            var existing = Read(existingId);
             if (!existing.IsRevoked &&
                 string.Equals(existing.ProductCode, request.ProductCode, StringComparison.Ordinal) &&
                 string.Equals(existing.MachineCode, request.MachineCode, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    $"License {existingId} already exists for this product and device. Renew the existing license or explicitly revoke it before replacement.");
+                    $"License {existing.LicenseId} already exists for this product and device. Renew the existing license or explicitly revoke it before replacement.");
             }
         }
 
@@ -100,7 +91,7 @@ public sealed class LicenseIssuer
 
         var expiry = current.ExpiresAtUtc
             ?? throw new InvalidDataException("Finite license has no expiry.");
-        return Save(Next(current, utcNow, (expiry > utcNow ? expiry : utcNow).AddDays(days), false), true);
+        return SaveRevision(current, Next(current, utcNow, (expiry > utcNow ? expiry : utcNow).AddDays(days), false));
     }
 
     public string Revoke(long id, DateTime utcNow)
@@ -109,8 +100,104 @@ public sealed class LicenseIssuer
         var current = Read(id);
         return current.IsRevoked
             ? LicensePath(id)
-            : Save(Next(current, utcNow, current.ExpiresAtUtc, true), true);
+            : SaveRevision(current, Next(current, utcNow, current.ExpiresAtUtc, true));
     }
+
+    public IReadOnlyList<LicensePayload> List(long? customerId = null)
+    {
+        if (customerId is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(customerId));
+        }
+
+        using var gate = LockLedger();
+        return ReadAll().Where(item => customerId is null || item.CustomerId == customerId)
+            .OrderBy(item => item.CustomerId).ThenBy(item => item.ProductCode, StringComparer.Ordinal)
+            .ThenBy(item => item.LicenseId).ToArray();
+    }
+
+    public IReadOnlyList<LicensePayload> History(long id)
+    {
+        using var gate = LockLedger();
+        var current = Read(id);
+        var records = new List<LicensePayload>();
+        var historyDirectory = HistoryDirectory(id);
+        if (Directory.Exists(historyDirectory))
+        {
+            foreach (var path in Directory.EnumerateFiles(historyDirectory, "*.lic"))
+            {
+                var revision = ParseLedgerId(path);
+                var record = Authenticate(File.ReadAllText(path), id);
+                if (record.Revision != revision || revision > current.Revision ||
+                    record.CustomerId != current.CustomerId || record.ProductId != current.ProductId ||
+                    !string.Equals(record.ProductCode, current.ProductCode, StringComparison.Ordinal) ||
+                    !string.Equals(record.MachineCode, current.MachineCode, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException("Historical ledger record does not match the current license.");
+                }
+
+                if (revision == current.Revision)
+                {
+                    // A failed replacement may leave an archived copy of the current record.
+                    if (!string.Equals(File.ReadAllText(path), File.ReadAllText(LicensePath(id)), StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException("Conflicting ledger revision.");
+                    }
+                    continue;
+                }
+
+                records.Add(record);
+            }
+        }
+
+        records.Add(current);
+        return records.OrderBy(record => record.Revision).ToArray();
+    }
+
+    private IEnumerable<LicensePayload> ReadAll()
+    {
+        foreach (var path in Directory.EnumerateFiles(_directory, "*.lic"))
+        {
+            yield return Read(ParseLedgerId(path));
+        }
+    }
+
+    private static long ParseLedgerId(string path)
+    {
+        if (!long.TryParse(Path.GetFileNameWithoutExtension(path), NumberStyles.None,
+                CultureInfo.InvariantCulture, out var id) || id <= 0 ||
+            !string.Equals(Path.GetFileName(path), id.ToString(CultureInfo.InvariantCulture) + ".lic",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Unexpected license ledger filename.");
+        }
+
+        return id;
+    }
+
+    private string SaveRevision(LicensePayload current, LicensePayload next)
+    {
+        var directory = HistoryDirectory(current.LicenseId);
+        Directory.CreateDirectory(directory);
+        var archive = Path.Combine(directory, current.Revision.ToString(CultureInfo.InvariantCulture) + ".lic");
+        var content = File.ReadAllText(LicensePath(current.LicenseId));
+        if (File.Exists(archive))
+        {
+            if (!string.Equals(File.ReadAllText(archive), content, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Conflicting historical revision.");
+            }
+        }
+        else
+        {
+            WriteAtomically(archive, content, overwrite: false);
+        }
+
+        return Save(next, overwrite: true);
+    }
+
+    private string HistoryDirectory(long id) =>
+        Path.Combine(_directory, "history", id.ToString(CultureInfo.InvariantCulture));
 
     private static LicensePayload Next(LicensePayload current, DateTime utcNow,
         DateTime? expiresAtUtc, bool revoked) => new()
@@ -136,7 +223,11 @@ public sealed class LicenseIssuer
             throw new ArgumentOutOfRangeException(nameof(id));
         }
 
-        var content = File.ReadAllText(LicensePath(id));
+        return Authenticate(File.ReadAllText(LicensePath(id)), id);
+    }
+
+    private LicensePayload Authenticate(string content, long id)
+    {
         var envelope = JsonSerializer.Deserialize<LicenseEnvelope>(content, Json)
             ?? throw new InvalidDataException("Invalid ledger envelope.");
         var payload = JsonSerializer.Deserialize<LicensePayload>(Convert.FromBase64String(envelope.Payload), Json)
@@ -168,6 +259,12 @@ public sealed class LicenseIssuer
         }, Json);
 
         var path = LicensePath(payload.LicenseId);
+        WriteAtomically(path, content, overwrite);
+        return path;
+    }
+
+    private static void WriteAtomically(string path, string content, bool overwrite)
+    {
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -180,7 +277,6 @@ public sealed class LicenseIssuer
             }
 
             File.Move(temp, path, overwrite);
-            return path;
         }
         finally
         {

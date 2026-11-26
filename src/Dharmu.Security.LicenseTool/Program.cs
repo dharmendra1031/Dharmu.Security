@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using Dharmu.Security.LicenseTool;
+using Dharmu.Security.Core.Licensing;
 
 if (!OperatingSystem.IsWindows())
 {
@@ -44,7 +45,10 @@ try
 
     if (args is not ["issue", _, _, _, _, _, _] &&
         args is not ["renew", _, _, _] &&
-        args is not ["revoke", _, _])
+        args is not ["revoke", _, _] &&
+        args is not ["list", _] &&
+        args is not ["list", _, _] &&
+        args is not ["history", _, _])
     {
         Console.Error.WriteLine("""
             Owner-only commands (optional --tpm at end):
@@ -52,6 +56,8 @@ try
               issue <ledger-dir> <activation.json> <product-code> <customer-id> <product-id> <days|lifetime>
               renew <ledger-dir> <license-id> <days>
               revoke <ledger-dir> <license-id>
+              list <ledger-dir> [customer-id]
+              history <ledger-dir> <license-id>
             """);
         return 1;
     }
@@ -60,6 +66,20 @@ try
     using var ecdsa = new ECDsaCng(signingKey);
     var issuer = new LicenseIssuer(args[1], ecdsa, keyId);
     var now = DateTime.UtcNow;
+    if (args[0] == "list" || args[0] == "history")
+    {
+        var records = args[0] == "history"
+            ? issuer.History(ParseId(args[2]))
+            : issuer.List(args.Length == 3 ? ParseId(args[2]) : null);
+        foreach (var record in records)
+        {
+            PrintRecord(record, now);
+        }
+
+        Console.WriteLine($"Records: {records.Count}");
+        return 0;
+    }
+
     var file = args[0] switch
     {
         "issue" => issuer.Issue(ReadActivationRequest(args[2]), args[3], ParseId(args[4]), ParseId(args[5]),
@@ -77,6 +97,18 @@ catch (Exception exception) when (exception is IOException or InvalidDataExcepti
 {
     Console.Error.WriteLine(exception.Message);
     return 1;
+}
+
+static void PrintRecord(LicensePayload record, DateTime now)
+{
+    var status = record.IsRevoked ? "Revoked"
+        : now < record.ValidFromUtc ? "Not yet valid"
+        : record.IsLifetime ? "Lifetime"
+        : now >= record.ExpiresAtUtc ? "Expired" : "Active";
+    Console.WriteLine(FormattableString.Invariant(
+        $"License: {record.LicenseId} | Revision: {record.Revision} | Customer: {record.CustomerId} | Product: {record.ProductCode} | Status: {status}"));
+    Console.WriteLine(FormattableString.Invariant(
+        $"  Machine: {record.MachineCode} | Issued UTC: {record.IssuedAtUtc:O} | Expires UTC: {record.ExpiresAtUtc:O}"));
 }
 
 static long ParseId(string value) => long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);

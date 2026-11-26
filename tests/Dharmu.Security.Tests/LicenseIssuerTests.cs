@@ -83,6 +83,44 @@ public sealed class LicenseIssuerTests : IDisposable
     }
 
     [Fact]
+    public void ListAndHistory_ReturnAuthenticatedCustomerRecordsAndRevisions()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var device = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        var generator = new ActivationRequestGenerator(device);
+        issuer.Issue(generator.Generate("ERP", _now), "ERP", 1, 2, 30, _now);
+        issuer.Issue(generator.Generate("POS", _now), "POS", 2, 3, 30, _now);
+        var initial = Assert.Single(issuer.List(1));
+        issuer.Renew(initial.LicenseId, 30, _now.AddDays(1));
+        issuer.Revoke(initial.LicenseId, _now.AddDays(2));
+        issuer.Revoke(initial.LicenseId, _now.AddDays(3));
+        issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        Assert.Equal(2, issuer.List().Count);
+        Assert.Empty(issuer.List(99));
+        Assert.True(Assert.Single(issuer.List(1)).IsRevoked);
+        var history = issuer.History(initial.LicenseId);
+        Assert.Equal(new long[] { 1, 2, 3 }, history.Select(record => record.Revision));
+        Assert.False(history[0].IsRevoked);
+        Assert.True(history[2].IsRevoked);
+    }
+
+    [Fact]
+    public void TamperedHistory_IsRejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var device = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        var request = new ActivationRequestGenerator(device).Generate("ERP", _now);
+        issuer.Issue(request, "ERP", 1, 2, 30, _now);
+        var id = Assert.Single(issuer.List()).LicenseId;
+        issuer.Renew(id, 30, _now.AddDays(1));
+        var archive = Assert.Single(Directory.GetFiles(Path.Combine(_directory, "history"), "*.lic", SearchOption.AllDirectories));
+        File.WriteAllText(archive, File.ReadAllText(archive).Replace("ECDSA-P256-SHA256", "invalid", StringComparison.Ordinal));
+        Assert.Throws<InvalidDataException>(() => issuer.History(id));
+    }
+
+    [Fact]
     public void OversizedActivationRequest_IsRejected()
     {
         Assert.Throws<InvalidDataException>(() =>
