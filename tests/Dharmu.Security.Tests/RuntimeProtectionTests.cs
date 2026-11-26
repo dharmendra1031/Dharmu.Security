@@ -126,6 +126,38 @@ public sealed class RuntimeProtectionTests : IDisposable
     }
 
     [Fact]
+    public async Task IndependentGuards_ObserveRevisionAndRevocationWithoutRestart()
+    {
+        var first = CreateGuard(new TestProtector());
+        var second = CreateGuard(new TestProtector());
+        Assert.True((await first.CheckAsync(CreateLicense(1), _now)).IsValid);
+        Assert.True((await second.CheckAsync(CreateLicense(1), _now)).IsValid);
+        Assert.True((await first.CheckAsync(CreateLicense(2), _now)).IsValid);
+        Assert.Equal(LicenseClockStatus.StaleRevision,
+            (await second.CheckAsync(CreateLicense(1), _now)).Status);
+        Assert.Equal(LicenseClockStatus.Revoked,
+            (await second.CheckAsync(CreateLicense(3, true), _now)).Status);
+        Assert.Equal(LicenseClockStatus.Revoked,
+            (await first.CheckAsync(CreateLicense(2), _now)).Status);
+    }
+
+    [Fact]
+    public async Task ConcurrentGuards_DoNotLoseRevocationHistory()
+    {
+        var first = CreateGuard(new TestProtector());
+        var second = CreateGuard(new TestProtector());
+        var results = await Task.WhenAll(
+            first.CheckAsync(CreateLicense(2, true, 1), _now),
+            second.CheckAsync(CreateLicense(2, true, 2), _now));
+        Assert.All(results, result => Assert.Equal(LicenseClockStatus.Revoked, result.Status));
+        var restarted = CreateGuard(new TestProtector());
+        Assert.Equal(LicenseClockStatus.Revoked,
+            (await restarted.CheckAsync(CreateLicense(1, id: 1), _now)).Status);
+        Assert.Equal(LicenseClockStatus.Revoked,
+            (await restarted.CheckAsync(CreateLicense(1, id: 2), _now)).Status);
+    }
+
+    [Fact]
     public async Task FailedRevocationWrite_BlocksOldLicenseUntilDurable()
     {
         var protector = new TestProtector();

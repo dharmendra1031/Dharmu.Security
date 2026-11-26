@@ -6,6 +6,16 @@ namespace Dharmu.Security.Windows.Machine;
 public sealed class WindowsMachineIdentityProvider : IMachineIdentityProvider
 {
     public const string DeviceKeyName = "DharmuSecurityDeviceIdentity";
+    private readonly CngProvider _provider;
+
+    public WindowsMachineIdentityProvider() : this(false) { }
+
+    public WindowsMachineIdentityProvider(bool requireTpm)
+    {
+        _provider = requireTpm
+            ? CngProvider.MicrosoftPlatformCryptoProvider
+            : CngProvider.MicrosoftSoftwareKeyStorageProvider;
+    }
 
     public string GetMachineCode()
     {
@@ -43,36 +53,14 @@ public sealed class WindowsMachineIdentityProvider : IMachineIdentityProvider
         }
     }
 
-    private static CngKey OpenDeviceKey()
+    private CngKey OpenDeviceKey()
     {
-        var providers = new[]
+        if (!CngKey.Exists(DeviceKeyName, _provider, CngKeyOpenOptions.MachineKey))
         {
-            CngProvider.MicrosoftPlatformCryptoProvider,
-            CngProvider.MicrosoftSoftwareKeyStorageProvider
-        };
-
-        foreach (var provider in providers)
-        {
-            try
-            {
-                if (CngKey.Exists(
-                        DeviceKeyName,
-                        provider,
-                        CngKeyOpenOptions.MachineKey))
-                {
-                    return CngKey.Open(
-                        DeviceKeyName,
-                        provider,
-                        CngKeyOpenOptions.MachineKey);
-                }
-            }
-            catch (CryptographicException)
-            {
-                // Try the next Windows key-storage provider.
-            }
+            throw new InvalidOperationException(
+                $"Dharmu.Security device identity is not provisioned for {_provider.Provider}.");
         }
 
-        throw new InvalidOperationException(
-            "Dharmu.Security device identity is not provisioned on this machine.");
+        return CngKey.Open(DeviceKeyName, _provider, CngKeyOpenOptions.MachineKey);
     }
 }

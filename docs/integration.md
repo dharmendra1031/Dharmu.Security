@@ -49,7 +49,12 @@ Before generating an activation request, provision the machine identity once:
 
 `Dharmu.Security.DeviceTool.exe`
 
-Use `--tpm` on supported Windows hardware when TPM-backed identity is required.
+Use `--tpm` on supported Windows hardware when TPM-backed identity is required,
+and set `options.RequireTpmDeviceIdentity = true` in the application. Without
+this option the runtime uses software CNG only. Do not change the selected
+provider for an already licensed device; existing TPM installations must
+explicitly configure the option on upgrade. A TPM-backed key is not remote
+hardware attestation.
 
 Then open:
 

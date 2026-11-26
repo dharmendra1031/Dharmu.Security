@@ -11,6 +11,11 @@
 
    `Dharmu.Security.DeviceTool.exe --tpm`
 
+   Set `options.RequireTpmDeviceIdentity = true` in the application for this
+   provisioning mode. The default is software CNG only. Existing TPM installations
+   must set this option before upgrading. The runtime does not silently switch
+   providers if the configured key cannot be opened.
+
 3. Start the ASP.NET Core application.
 4. Download the activation request from:
 
@@ -82,8 +87,11 @@ issuing schema 2 files; earlier SDK builds cannot read them.
 
 The revision history is stored in the existing DPAPI-protected runtime state.
 It survives normal restarts but not administrator-controlled deletion or
-restoration of all trusted local state. It requires a single application process
-per state path and restrictive filesystem ACLs. An independent trusted anchor
+restoration of all trusted local state. Cooperating workers use an exclusive lock file and merge the latest persisted
+state before validation. All workers must use the same canonical local state
+path, filesystem and restrictive ACLs. Do not delete the lock file while workers
+are running. A failed state write blocks the observing worker, but cannot
+guarantee other workers observe an event that never reached durable storage. An independent trusted anchor
 or online lease is necessary for stronger anti-rollback guarantees.
 
 ## Protected database connection string

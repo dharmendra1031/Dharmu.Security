@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dharmu.Security.Core.Licensing;
@@ -17,7 +18,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private LicenseRuntimeState? _state;
-    private bool _stateLoaded;
+    private string? _persistedContent;
     private bool _dirty;
     private DateTime _lastPersistedUtc;
 
@@ -40,15 +41,12 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
         try
         {
-            if (!_stateLoaded)
+            // Serialize read/merge/write across cooperating worker processes.
+            using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var loadResult = await LoadStateAsync(cancellationToken);
+            if (!loadResult.IsValid)
             {
-                var loadResult = await LoadStateAsync(cancellationToken);
-                if (!loadResult.IsValid)
-                {
-                    return loadResult;
-                }
-
-                _stateLoaded = true;
+                return loadResult;
             }
 
             if (_state is not null)
@@ -158,7 +156,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
         if (!File.Exists(path))
         {
-            return File.Exists(path + ".initialized")
+            return _persistedContent is not null || File.Exists(path + ".initialized")
                 ? LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid)
                 : LicenseClockResult.Valid();
         }
@@ -166,6 +164,12 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
         try
         {
             var protectedState = await File.ReadAllTextAsync(path, cancellationToken);
+            if (string.Equals(protectedState, _persistedContent, StringComparison.Ordinal))
+            {
+                EnsureInitializationMarker(path);
+                return LicenseClockResult.Valid();
+            }
+
             var json = _secretProtector.Unprotect(protectedState);
 
             var state = JsonSerializer.Deserialize<LicenseRuntimeState>(json, JsonOptions)
@@ -179,9 +183,40 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
                 return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
             }
 
+            if (_state is not null)
+            {
+                if (!string.Equals(_state.ProductCode, state.ProductCode, StringComparison.Ordinal))
+                {
+                    return LicenseClockResult.Invalid(LicenseClockStatus.StateInvalid);
+                }
+
+                // Never overwrite a newer observation from another worker, or
+                // discard a pending local observation after a failed write.
+                foreach (var (id, local) in _state.Revisions)
+                {
+                    if (!state.Revisions.TryGetValue(id, out var stored))
+                    {
+                        state.Revisions.Add(id, local);
+                        _dirty = true;
+                    }
+                    else if (local.Revision > stored.Revision || (local.Revoked && !stored.Revoked))
+                    {
+                        stored.Revision = Math.Max(local.Revision, stored.Revision);
+                        stored.Revoked |= local.Revoked;
+                        _dirty = true;
+                    }
+                }
+            }
+
             EnsureInitializationMarker(path);
-            _state = state;
             _lastPersistedUtc = state.LastValidatedUtc;
+            if (_state is not null && _state.LastValidatedUtc > state.LastValidatedUtc)
+            {
+                state.LastValidatedUtc = _state.LastValidatedUtc;
+            }
+
+            _state = state;
+            _persistedContent = protectedState;
             return LicenseClockResult.Valid();
         }
         catch (Exception exception) when (
@@ -208,7 +243,7 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
 
         var json = JsonSerializer.Serialize(state, JsonOptions);
         var protectedState = _secretProtector.Protect(json);
-        var temporaryPath = $"{path}.tmp";
+        var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
 
         try
         {
@@ -230,8 +265,31 @@ public sealed class LicenseClockGuard : ILicenseClockGuard
                 File.Delete(temporaryPath);
             }
         }
+        _persistedContent = protectedState;
         _lastPersistedUtc = state.LastValidatedUtc;
         _dirty = false;
+    }
+
+    private async Task<FileStream> AcquireProcessLockAsync(CancellationToken cancellationToken)
+    {
+        var path = ResolveStatePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var started = Stopwatch.GetTimestamp();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(path + ".lock", FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException exception) when (
+                (exception.HResult & 0xFFFF) is 32 or 33 &&
+                Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2))
+            {
+                await Task.Delay(20, cancellationToken);
+            }
+        }
     }
 
     // This local sidecar detects isolated state-file loss, not administrator rollback

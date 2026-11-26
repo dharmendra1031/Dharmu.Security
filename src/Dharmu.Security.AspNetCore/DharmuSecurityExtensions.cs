@@ -36,7 +36,9 @@ public static class DharmuSecurityExtensions
             .ValidateOnStart();
 
         services.AddSingleton<ILicenseValidator, EcdsaLicenseValidator>();
-        services.AddSingleton<IMachineIdentityProvider, WindowsMachineIdentityProvider>();
+        services.AddSingleton<IMachineIdentityProvider>(provider =>
+            new WindowsMachineIdentityProvider(
+                provider.GetRequiredService<IOptions<DharmuSecurityOptions>>().Value.RequireTpmDeviceIdentity));
         services.AddSingleton<IActivationRequestGenerator, ActivationRequestGenerator>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<ILicenseClockGuard, LicenseClockGuard>();
