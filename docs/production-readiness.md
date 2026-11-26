@@ -65,6 +65,20 @@
 7. Pilot one real application and measure end-to-end billing and database
    latency on target hardware before broad rollout.
 
-These are acceptance criteria, not a claim that manual or physical tests
-have already passed. No fully offline design can guarantee piracy prevention
-against a privileged local administrator.
+No fully offline design can guarantee piracy prevention against a privileged
+local administrator.
+
+## Physical Windows test result
+
+On 2026-11-26, the packaged Kestrel smoke test passed on two physical Windows
+computers using commit `1b7122d` and NuGet packages version `0.2.0`.
+
+| Machine | Observed result |
+| --- | --- |
+| PC A | Activation request and license issuance succeeded. The protected route returned HTTP 200 with the valid license. Revocation blocked access, and restoring the original license still returned HTTP 403 after a restart. `PACKAGE_RUNTIME_SMOKE PASS`. |
+| PC B | A distinct software CNG identity rejected PC A's copied license with `MachineMismatch` and HTTP 403. Health returned HTTP 200. `CROSS_MACHINE_LICENSE PASS`. |
+| PC B | PC A's copied DPAPI test ciphertext failed to decrypt. `CROSS_MACHINE_DPAPI PASS`. |
+
+The physical DPAPI result applies to the format in `1b7122d`. The device-bound
+DPAPI format introduced in `f06ac2a` still needs a physical rerun. Renewal,
+authorized replacement, TPM-backed identity and IIS were outside this run.

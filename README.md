@@ -79,7 +79,7 @@ Only create the tag after confirming the commit and version. GitHub Actions vali
 
 - Published private GitHub Packages feed and authorized cross-repository restore
 - IIS App Pool key-permission test
-- Physical second-machine rejection (single Windows runner activation and revocation already passed)
+- Physical second-machine rejection with the current device-bound DPAPI format. See the [physical test result for commit `1b7122d`](docs/production-readiness.md#physical-windows-test-result).
 - Signing-key rotation deployment test
 - Offline expiry/grace and permitted read/export enforcement
 
