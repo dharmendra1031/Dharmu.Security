@@ -57,16 +57,16 @@ Production database credentials must not be committed to source control.
 
 The earlier 0.1.0 baseline passed restore/build, unit tests, packaging and a sample consumption build. Latest security and issuer changes require a fresh successful Windows CI run before release.
 
-The package publishing workflow is **release-tag gated**, not triggered by normal development commits. From a reviewed `development` commit, release version `0.1.0` by pushing the matching tag:
+The package publishing workflow is **release-tag gated**, not triggered by normal development commits. From a reviewed `development` commit, release candidate version `0.2.0` only after approval by pushing the matching tag:
 
 ```bash
 git checkout development
 git pull --ff-only origin development
-git tag security-v0.1.0
-git push origin security-v0.1.0
+git tag security-v0.2.0
+git push origin security-v0.2.0
 ```
 
-Only create the tag after confirming the commit and version. GitHub Actions will validate that the tag matches each project version, rerun build and tests, and publish to **private GitHub Packages** using `GITHUB_TOKEN`. Treat published package versions as immutable. Consuming projects need separately authorized package-read credentials; never commit tokens to source. A successful CI artifact upload alone **does not mean** the private feed has a published package.
+Only create the tag after confirming the commit and version. GitHub Actions validates that the tag matches every project version, calls the same build/test/package-consumption workflow used on development, and publishes only the verified runtime artifacts to GitHub Packages using a scoped `GITHUB_TOKEN`. Confirm private package visibility and authorized restore in GitHub Packages before deploying. The issuer is never a runtime package. Treat published package versions as immutable. Consuming projects need separately authorized package-read credentials; never commit tokens to source. A successful CI artifact upload alone **does not mean** the private feed has a published package.
 
 ## Still pending verification / hardening
 

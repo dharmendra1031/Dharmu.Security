@@ -14,6 +14,10 @@ public sealed class ActivationRequestParser
     public ActivationRequest Parse(string content, DateTime utcNow)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
+        if (content.Length > 64 * 1024)
+        {
+            throw new InvalidDataException("Activation request is too large.");
+        }
 
         try
         {

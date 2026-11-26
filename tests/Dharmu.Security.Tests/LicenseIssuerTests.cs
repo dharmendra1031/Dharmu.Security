@@ -63,6 +63,13 @@ public sealed class LicenseIssuerTests : IDisposable
         Assert.Empty(Directory.GetFiles(_directory, "*.lic"));
     }
 
+    [Fact]
+    public void OversizedActivationRequest_IsRejected()
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            new ActivationRequestParser().Parse(new string('A', 64 * 1024 + 1), _now));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

@@ -62,7 +62,7 @@ try
     var now = DateTime.UtcNow;
     var file = args[0] switch
     {
-        "issue" => issuer.Issue(File.ReadAllText(args[2]), args[3], ParseId(args[4]), ParseId(args[5]),
+        "issue" => issuer.Issue(ReadActivationRequest(args[2]), args[3], ParseId(args[4]), ParseId(args[5]),
             args[6] == "lifetime" ? null : ParseDays(args[6]), now),
         "renew" => issuer.Renew(ParseId(args[2]), ParseDays(args[3]), now),
         "revoke" => issuer.Revoke(ParseId(args[2]), now),
@@ -71,7 +71,7 @@ try
     Console.WriteLine($"Signed license: {file}");
     return 0;
 }
-catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException
     or CryptographicException or FormatException or InvalidOperationException
     or ArgumentException or System.Text.Json.JsonException or OverflowException)
 {
@@ -81,3 +81,15 @@ catch (Exception exception) when (exception is IOException or UnauthorizedAccess
 
 static long ParseId(string value) => long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
 static int ParseDays(string value) => int.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
+
+static string ReadActivationRequest(string path)
+{
+    using var stream = File.OpenRead(path);
+    if (stream.Length > 64 * 1024)
+    {
+        throw new InvalidDataException("Activation request exceeds 64 KiB.");
+    }
+
+    using var reader = new StreamReader(stream);
+    return reader.ReadToEnd();
+}

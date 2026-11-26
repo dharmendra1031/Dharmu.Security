@@ -8,51 +8,57 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  publish:
+  check-version:
     runs-on: windows-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          persist-credentials: false
 
       - name: Check package version
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          if (-not $tag.StartsWith('security-v')) { throw 'Publishing requires a security-v* tag.' }
-          $version = $tag.Substring(10)
+          if ($env:GITHUB_REF -notmatch '^refs/tags/security-v(\d+\.\d+\.\d+)$') {
+            throw 'Publishing requires a stable security-vX.Y.Z tag.'
+          }
+          $version = $Matches[1]
           foreach ($project in @(
             'src/Dharmu.Security.Core/Dharmu.Security.Core.csproj',
             'src/Dharmu.Security.Windows/Dharmu.Security.Windows.csproj',
             'src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj'
           )) {
-            $packageVersion = ([xml](Get-Content $project)).Project.PropertyGroup.Version
-            if ($packageVersion -ne $version) { throw "Package version $packageVersion does not match tag $tag in $project" }
+            $packageVersion = ([xml](Get-Content -Raw $project)).Project.PropertyGroup.Version
+            if ($packageVersion -ne $version) { throw "Package version $packageVersion does not match tag in $project" }
           }
 
-      - name: Restore
-        run: dotnet restore Dharmu.Security.slnx
+  verify:
+    needs: check-version
+    uses: ./.github/workflows/build.yml
 
-      - name: Build
-        run: dotnet build Dharmu.Security.slnx --configuration Release --no-restore
+  publish:
+    needs: verify
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
 
-      - name: Test
-        run: dotnet test tests/Dharmu.Security.Tests/Dharmu.Security.Tests.csproj --configuration Release --no-build --no-restore
+      - uses: actions/download-artifact@v4
+        with:
+          name: dharmu-security-packages
+          path: artifacts
 
-      - name: Pack Core
-        run: dotnet pack src/Dharmu.Security.Core/Dharmu.Security.Core.csproj --configuration Release --no-build --no-restore --output artifacts
-
-      - name: Pack Windows
-        run: dotnet pack src/Dharmu.Security.Windows/Dharmu.Security.Windows.csproj --configuration Release --no-build --no-restore --output artifacts
-
-      - name: Pack ASP.NET Core
-        run: dotnet pack src/Dharmu.Security.AspNetCore/Dharmu.Security.AspNetCore.csproj --configuration Release --no-build --no-restore --output artifacts
-
-      - name: Publish
-        run: dotnet nuget push "artifacts/*.nupkg" --source "https://nuget.pkg.github.com/dharmendra1031/index.json" --api-key "${{ secrets.GITHUB_TOKEN }}" --skip-duplicate
+      - name: Publish verified packages
+        shell: pwsh
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $packages = @(Get-ChildItem artifacts/*.nupkg)
+          if ($packages.Count -ne 3) { throw 'Expected exactly three verified runtime packages.' }
+          dotnet nuget push 'artifacts/*.nupkg' --source 'https://nuget.pkg.github.com/dharmendra1031/index.json' --api-key $env:NUGET_AUTH_TOKEN
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

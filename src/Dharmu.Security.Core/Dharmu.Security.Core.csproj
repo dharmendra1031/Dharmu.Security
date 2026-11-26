@@ -2,7 +2,7 @@
   <PropertyGroup>
     <PackageId>Dharmu.Security.Core</PackageId>
     <Description>Core offline licensing contracts and validation for Dharmu.Security.</Description>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Dharmu</Authors>
     <RepositoryUrl>https://github.com/dharmendra1031/Dharmu.Security</RepositoryUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
