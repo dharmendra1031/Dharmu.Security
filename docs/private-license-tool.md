@@ -1,6 +1,6 @@
 # Private License Tool (owner only)
 
-A standalone Windows console application, not a NuGet package. Build/publish
+A standalone Windows owner application with a GUI and retained console commands, not a NuGet package. Build/publish
 only on a trusted owner workstation. Do not distribute the tool, signing key
 or ledger to customer machines. Customer projects install the ASP.NET Core
 runtime package only; it does not reference this tool.
@@ -17,7 +17,9 @@ Build on Windows:
 dotnet publish src/Dharmu.Security.LicenseTool -c Release -r win-x64 --self-contained false
 ```
 
-Run these commands from the tool directory on the owner machine:
+Double-click the published Dharmu.Security.LicenseTool.exe on the trusted owner workstation. Select the existing issuer provider and authoritative ledger, then Issue, Renew, Revoke, List, History, Rotate or Replace. Export the signed copy outside the ledger. Initialize/export public key is a separate explicit operation. The GUI reuses the same command implementation and signing/ledger checks; it does not replace the private key or migrate the legacy manager. The existing console window is retained for CLI compatibility.
+
+For automation, run these commands from the tool directory on the owner machine:
 ```powershell
 .\Dharmu.Security.LicenseTool.exe init C:\Owner\issuer-public.pem --tpm
 .\Dharmu.Security.LicenseTool.exe issue C:\Owner\Ledger C:\Owner\activation.json SR_CONSTRUCTION 1 1 365 --tpm
