@@ -1,4 +1,7 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using Microsoft.Win32.SafeHandles;
 
 namespace Dharmu.Security.LicenseTool;
 
@@ -7,6 +10,7 @@ internal sealed class OwnerLicenseForm : Form
     private readonly TextBox _ledger = new() { Dock = DockStyle.Fill, ReadOnly = true };
     private readonly TextBox _request = new() { Dock = DockStyle.Fill, ReadOnly = true };
     private readonly TextBox _trust = new() { Dock = DockStyle.Fill, ReadOnly = true };
+    private readonly TextBox _issuerPem = new() { Dock = DockStyle.Fill, ReadOnly = true };
     private readonly TextBox _slot = new() { Dock = DockStyle.Fill, PlaceholderText = "Leave empty for existing issuer-v1" };
     private readonly CheckBox _tpm = new() { Text = "Issuer uses TPM (match the existing key)", AutoSize = true };
     private readonly TextBox _product = new() { Dock = DockStyle.Fill, PlaceholderText = "Exact product code" };
@@ -38,6 +42,10 @@ internal sealed class OwnerLicenseForm : Form
         Add(new Label { Text = "Owner-only — use the existing signing key and authoritative ledger", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
         Field("Issuer key slot", _slot);
         Add(_tpm);
+        Field("Original issuer public PEM", Picker(_issuerPem, ChooseIssuerPem));
+        var checkKey = new Button { Text = "Check Issuer Key", Dock = DockStyle.Top, AutoSize = true };
+        checkKey.Click += (_, _) => CheckIssuerKey();
+        Add(checkKey);
         Field("Authoritative ledger directory", Picker(_ledger, () => ChooseFolder(_ledger)));
         Field("Trusted old public keys (optional, for rotation)", Picker(_trust, () => ChooseFolder(_trust)));
         _operation.Items.AddRange(new object[] { "Issue", "Renew", "Revoke", "List", "History", "Initialize / export public key", "Rotate", "Replace retired device" });
@@ -94,6 +102,122 @@ internal sealed class OwnerLicenseForm : Form
     {
         using var dialog = new FolderBrowserDialog { SelectedPath = input.Text };
         if (dialog.ShowDialog(this) == DialogResult.OK) input.Text = dialog.SelectedPath;
+    }
+
+    private void ChooseIssuerPem()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Select the trusted owner public PEM already pinned in the client",
+            Filter = "Public key (*.pem)|*.pem",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK) _issuerPem.Text = dialog.FileName;
+    }
+
+    [DllImport("ncrypt.dll", CharSet = CharSet.Unicode)]
+    private static extern int NCryptOpenStorageProvider(
+        out SafeNCryptProviderHandle provider, string providerName, int flags);
+
+    private static CngKey? ProbeIssuer(string keyName, CngProvider provider, string label, List<string> report)
+    {
+        var status = NCryptOpenStorageProvider(out var handle, provider.Provider, 0);
+        using (handle)
+        {
+            if (status != 0)
+            {
+                report.Add($"{label} provider: unavailable (0x{status:X8}).");
+                return null;
+            }
+        }
+        report.Add($"{label} provider: available (TPM hardware readiness is not established by this check).");
+        try
+        {
+            var key = CngKey.Open(keyName, provider, CngKeyOpenOptions.MachineKey);
+            report.Add($"{label} issuer key: found; open access allowed.");
+            return key;
+        }
+        catch (CryptographicException exception)
+        {
+            report.Add($"{label} issuer key: not accessible (0x{exception.HResult:X8}): {exception.Message}");
+            report.Add("A missing key, insufficient access or unavailable hardware can prevent opening it.");
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            report.Add($"{label} issuer key: access denied.");
+            return null;
+        }
+    }
+
+    private bool CheckIssuerKey()
+    {
+        var report = new List<string>();
+        var ready = false;
+        try
+        {
+            var slot = _slot.Text.Trim();
+            if (slot.Length > 40 || !slot.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+                throw new ArgumentException("Invalid issuer key slot.");
+            var keyName = slot.Length == 0 ? "DharmuSecurityIssuer" : "DharmuSecurityIssuer-" + slot;
+            report.Add($"Computer: {Environment.MachineName}; issuer key: {keyName}");
+            report.Add($"Selected provider: {(_tpm.Checked ? "TPM" : "Software CNG")}");
+
+            using var software = ProbeIssuer(keyName, CngProvider.MicrosoftSoftwareKeyStorageProvider, "Software CNG", report);
+            using var tpm = ProbeIssuer(keyName, CngProvider.MicrosoftPlatformCryptoProvider, "TPM", report);
+            var selected = _tpm.Checked ? tpm : software;
+            if (selected is null)
+            {
+                report.Add("Selected issuer: not accessible. PEM matching and signing test not run.");
+                if ((_tpm.Checked ? software : tpm) is not null)
+                    report.Add("The other provider has an accessible key. Confirm the original provider and PEM before changing the selection.");
+                return false;
+            }
+
+            using var signer = new ECDsaCng(selected);
+            if (signer.KeySize != 256 || selected.ExportPolicy != CngExportPolicies.None)
+                throw new CryptographicException("Expected a non-exportable ECDSA P-256 issuer key.");
+            var challenge = RandomNumberGenerator.GetBytes(32);
+            var signature = signer.SignData(challenge, HashAlgorithmName.SHA256);
+            using var verifier = ECDsa.Create();
+            verifier.ImportSubjectPublicKeyInfo(signer.ExportSubjectPublicKeyInfo(), out _);
+            var signed = verifier.VerifyData(challenge, signature, HashAlgorithmName.SHA256);
+            report.Add($"Signing and verification test: {(signed ? "PASS" : "FAIL")}");
+            if (!signed) return false;
+
+            if (string.IsNullOrWhiteSpace(_issuerPem.Text))
+            {
+                report.Add("Existing PEM: not selected. Browse to the original trusted owner PUBLIC PEM.");
+                return false;
+            }
+            using var stream = File.OpenRead(_issuerPem.Text);
+            if (stream.Length is <= 0 or > 65536)
+                throw new InvalidDataException("Public PEM size is invalid.");
+            using var reader = new StreamReader(stream);
+            var pem = reader.ReadToEnd().Trim();
+            if (!pem.StartsWith("-----BEGIN PUBLIC KEY-----", StringComparison.Ordinal) ||
+                !pem.EndsWith("-----END PUBLIC KEY-----", StringComparison.Ordinal))
+                throw new InvalidDataException("Select a public PEM only, never a private key.");
+            using var expected = ECDsa.Create();
+            expected.ImportFromPem(pem);
+            var match = expected.KeySize == 256 &&
+                expected.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(signer.ExportSubjectPublicKeyInfo()) &&
+                expected.VerifyData(challenge, signature, HashAlgorithmName.SHA256);
+            report.Add($"Existing PEM: {(match ? "MATCH" : "MISMATCH")}");
+            ready = match;
+            return ready;
+        }
+        catch (Exception exception)
+        {
+            report.Add($"Check failed: {exception.Message}");
+            return false;
+        }
+        finally
+        {
+            report.Add($"Issuer readiness: {(ready ? "READY" : "NOT READY")}");
+            report.Add("No key was created or replaced. Readiness does not validate the customer request or ledger.");
+            _result.Text = string.Join(Environment.NewLine, report);
+        }
     }
 
     private void ChooseRequest()
@@ -196,10 +320,12 @@ internal sealed class OwnerLicenseForm : Form
             }
             if (_tpm.Checked) args.Add("--tpm");
 
+            if (_operation.SelectedIndex != 5 && !CheckIssuerKey()) return;
+
             using var output = new StringWriter();
             using var error = new StringWriter();
             var exit = Program.Run(args.ToArray(), output, error, out var signedFile);
-            _result.Text = (exit == 0 ? "Completed." : "Operation failed.") + Environment.NewLine + output + error;
+            _result.AppendText(Environment.NewLine + (exit == 0 ? "Completed." : "Operation failed.") + Environment.NewLine + output + error);
             if (exit == 0 && signedFile is not null)
             {
                 _lastSignedFile = Path.GetFullPath(signedFile);
