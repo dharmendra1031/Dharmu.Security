@@ -45,28 +45,12 @@ public sealed class LicenseIssuer
         }
 
         using var gate = LockLedger();
-        foreach (var existing in ReadAll())
-        {
-            if (!existing.IsRevoked &&
-                string.Equals(existing.ProductCode, request.ProductCode, StringComparison.Ordinal) &&
-                string.Equals(existing.MachineCode, request.MachineCode, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"License {existing.LicenseId} already exists for this product and device. Renew the existing license or explicitly revoke it before replacement.");
-            }
-        }
-
-        long id;
-        do
-        {
-            id = BinaryPrimitives.ReadInt64LittleEndian(RandomNumberGenerator.GetBytes(8)) & long.MaxValue;
-        }
-        while (id == 0 || File.Exists(LicensePath(id)));
+        EnsureDeviceAvailable(ReadAll(), request.ProductCode, request.MachineCode);
 
         return Save(new LicensePayload
         {
             SchemaVersion = 2,
-            LicenseId = id,
+            LicenseId = NewLicenseId(),
             Revision = 1,
             CustomerId = customerId,
             ProductId = productId,
@@ -77,6 +61,86 @@ public sealed class LicenseIssuer
             ExpiresAtUtc = days is int duration ? utcNow.AddDays(duration) : null,
             IsLifetime = days is null
         }, overwrite: false);
+    }
+
+    // The operator must first revoke the old ID and verify retirement of the old device.
+    // Replacement is a separate atomic operation; retrying cannot issue another ID.
+    public string Replace(long revokedId, string requestContent, DateTime utcNow)
+    {
+        var request = new ActivationRequestParser().Parse(requestContent, utcNow);
+        using var gate = LockLedger();
+        var current = Read(revokedId);
+        if (!current.IsRevoked)
+        {
+            throw new InvalidOperationException("Revoke the old license before authorizing replacement.");
+        }
+
+        if (!string.Equals(current.ProductCode, request.ProductCode, StringComparison.Ordinal) ||
+            string.Equals(current.MachineCode, request.MachineCode, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Replacement requires the same product and a different device.");
+        }
+
+        var records = ReadAll().ToArray();
+        var replacements = records.Where(item => item.ReplacesLicenseId == revokedId).ToArray();
+        if (replacements.Length != 0)
+        {
+            if (replacements.Length == 1 && !replacements[0].IsRevoked &&
+                string.Equals(replacements[0].MachineCode, request.MachineCode, StringComparison.Ordinal))
+            {
+                return LicensePath(replacements[0].LicenseId);
+            }
+
+            throw new InvalidOperationException("This license already has a replacement. Use its latest license ID.");
+        }
+
+        if (utcNow < current.IssuedAtUtc ||
+            (!current.IsLifetime && current.ExpiresAtUtc <= utcNow))
+        {
+            throw new InvalidOperationException("The original entitlement has expired or the issuer clock is incorrect.");
+        }
+
+        EnsureDeviceAvailable(records, current.ProductCode, request.MachineCode);
+        return Save(new LicensePayload
+        {
+            SchemaVersion = 2,
+            LicenseId = NewLicenseId(),
+            ReplacesLicenseId = current.LicenseId,
+            Revision = 1,
+            CustomerId = current.CustomerId,
+            ProductId = current.ProductId,
+            ProductCode = current.ProductCode,
+            MachineCode = request.MachineCode,
+            IssuedAtUtc = utcNow,
+            ValidFromUtc = utcNow,
+            ExpiresAtUtc = current.ExpiresAtUtc,
+            IsLifetime = current.IsLifetime
+        }, overwrite: false);
+    }
+
+    private static void EnsureDeviceAvailable(IEnumerable<LicensePayload> records, string productCode, string machineCode)
+    {
+        foreach (var existing in records)
+        {
+            if (!existing.IsRevoked &&
+                string.Equals(existing.ProductCode, productCode, StringComparison.Ordinal) &&
+                string.Equals(existing.MachineCode, machineCode, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"License {existing.LicenseId} already exists for this product and device. Renew the existing license or explicitly revoke it before replacement.");
+            }
+        }
+    }
+
+    private long NewLicenseId()
+    {
+        long id;
+        do
+        {
+            id = BinaryPrimitives.ReadInt64LittleEndian(RandomNumberGenerator.GetBytes(8)) & long.MaxValue;
+        }
+        while (id == 0 || File.Exists(LicensePath(id)));
+        return id;
     }
 
     public string Renew(long id, int days, DateTime utcNow)
@@ -130,6 +194,7 @@ public sealed class LicenseIssuer
                 var record = Authenticate(File.ReadAllText(path), id);
                 if (record.Revision != revision || revision > current.Revision ||
                     record.CustomerId != current.CustomerId || record.ProductId != current.ProductId ||
+                    record.ReplacesLicenseId != current.ReplacesLicenseId ||
                     !string.Equals(record.ProductCode, current.ProductCode, StringComparison.Ordinal) ||
                     !string.Equals(record.MachineCode, current.MachineCode, StringComparison.Ordinal))
                 {
@@ -204,6 +269,7 @@ public sealed class LicenseIssuer
     {
         SchemaVersion = 2,
         LicenseId = current.LicenseId,
+        ReplacesLicenseId = current.ReplacesLicenseId,
         Revision = checked(current.Revision + 1),
         CustomerId = current.CustomerId,
         ProductId = current.ProductId,

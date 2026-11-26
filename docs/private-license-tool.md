@@ -76,3 +76,25 @@ client's compiled trust configuration, and reissue licenses after verifying
 customer entitlements and device requests. The current CLI uses a fixed key ID;
 a controlled rotation workflow needs implementation before that transition.
 Never share the private key or weaken signature checks to restore access.
+
+## Authorized hardware replacement
+
+First verify the customer's entitlement and obtain the new device's signed activation
+request. Revoke the original ID and deliver the revocation to the old machine,
+then verify the old installation is retired (or document a physically failed device).
+Only then authorize replacement:
+
+```powershell
+.\Dharmu.Security.LicenseTool.exe revoke C:\Owner\Ledger <old-id> --tpm
+.\Dharmu.Security.LicenseTool.exe replace C:\Owner\Ledger <old-id> C:\Owner\new-activation.json confirm-retired --tpm
+```
+
+The confirmation is an owner attestation, not proof of remote revocation. The tool
+requires a revoked original, a different device, matching product and an unused
+target. It preserves customer, product and exact remaining expiry or lifetime;
+expired entitlements require a separately authorized new purchase/issue. A new
+signed ID records the original ID in ReplacesLicenseId. Retries for the same
+replacement device return the existing current license, not a duplicate. A further
+hardware replacement must use the latest ID. Never promise remote disablement of
+an offline old installation; a lost or inaccessible device may retain its original
+license until expiry, or indefinitely for a lifetime license.

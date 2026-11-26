@@ -121,6 +121,76 @@ public sealed class LicenseIssuerTests : IDisposable
     }
 
     [Fact]
+    public void Replacement_PreservesEntitlementAndIsIdempotent()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var oldDevice = new TestDevice();
+        using var newDevice = new TestDevice();
+        using var thirdDevice = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        var oldPath = issuer.Issue(new ActivationRequestGenerator(oldDevice).Generate("ERP", _now), "ERP", 1, 2, 30, _now);
+        var original = Assert.Single(issuer.List());
+        var now = _now.AddDays(2);
+        var request = new ActivationRequestGenerator(newDevice).Generate("ERP", now);
+        Assert.Throws<InvalidOperationException>(() => issuer.Replace(original.LicenseId, request, now));
+        issuer.Revoke(original.LicenseId, now);
+        var replacementPath = issuer.Replace(original.LicenseId, request, now);
+        Assert.Equal(replacementPath, issuer.Replace(original.LicenseId, request, now));
+        Assert.Throws<InvalidOperationException>(() => issuer.Replace(original.LicenseId,
+            new ActivationRequestGenerator(thirdDevice).Generate("ERP", now), now));
+        var replacement = Assert.Single(issuer.List().Where(item => !item.IsRevoked));
+        Assert.Equal(original.LicenseId, replacement.ReplacesLicenseId);
+        Assert.Equal(original.CustomerId, replacement.CustomerId);
+        Assert.Equal(original.ProductId, replacement.ProductId);
+        Assert.Equal(original.ExpiresAtUtc, replacement.ExpiresAtUtc);
+        Assert.Equal(newDevice.GetMachineCode(), replacement.MachineCode);
+        var validator = new EcdsaLicenseValidator();
+        var trusted = new Dictionary<string, string> { ["issuer-v1"] = key.ExportSubjectPublicKeyInfoPem() };
+        Assert.True(validator.Validate(File.ReadAllText(replacementPath), trusted, "ERP", newDevice.GetMachineCode(), now).IsValid);
+        Assert.Equal(LicenseValidationStatus.MachineMismatch, validator.Validate(
+            File.ReadAllText(replacementPath), trusted, "ERP", oldDevice.GetMachineCode(), now).Status);
+        Assert.Equal(LicenseValidationStatus.Revoked, validator.Validate(
+            File.ReadAllText(oldPath), trusted, "ERP", oldDevice.GetMachineCode(), now).Status);
+        issuer.Renew(replacement.LicenseId, 30, now);
+        Assert.All(issuer.History(replacement.LicenseId), item => Assert.Equal(original.LicenseId, item.ReplacesLicenseId));
+    }
+
+    [Fact]
+    public void Replacement_RejectsExpiredEntitlementAndWrongProduct()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var oldDevice = new TestDevice();
+        using var newDevice = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        issuer.Issue(new ActivationRequestGenerator(oldDevice).Generate("ERP", _now), "ERP", 1, 2, 1, _now);
+        var id = Assert.Single(issuer.List()).LicenseId;
+        issuer.Revoke(id, _now);
+        var generator = new ActivationRequestGenerator(newDevice);
+        Assert.Throws<InvalidDataException>(() => issuer.Replace(id, generator.Generate("POS", _now), _now));
+        var later = _now.AddDays(2);
+        Assert.Throws<InvalidOperationException>(() => issuer.Replace(id, generator.Generate("ERP", later), later));
+        Assert.Single(issuer.List());
+    }
+
+    [Fact]
+    public void Replacement_PreservesLifetimeAndRejectsOriginalDevice()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var oldDevice = new TestDevice();
+        using var newDevice = new TestDevice();
+        var issuer = new LicenseIssuer(_directory, key, "issuer-v1");
+        var request = new ActivationRequestGenerator(oldDevice).Generate("ERP", _now);
+        issuer.Issue(request, "ERP", 1, 2, null, _now);
+        var id = Assert.Single(issuer.List()).LicenseId;
+        issuer.Revoke(id, _now);
+        Assert.Throws<InvalidDataException>(() => issuer.Replace(id, request, _now));
+        issuer.Replace(id, new ActivationRequestGenerator(newDevice).Generate("ERP", _now), _now);
+        var replacement = Assert.Single(issuer.List().Where(item => !item.IsRevoked));
+        Assert.True(replacement.IsLifetime);
+        Assert.Null(replacement.ExpiresAtUtc);
+    }
+
+    [Fact]
     public void OversizedActivationRequest_IsRejected()
     {
         Assert.Throws<InvalidDataException>(() =>

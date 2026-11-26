@@ -48,7 +48,8 @@ try
         args is not ["revoke", _, _] &&
         args is not ["list", _] &&
         args is not ["list", _, _] &&
-        args is not ["history", _, _])
+        args is not ["history", _, _] &&
+        args is not ["replace", _, _, _, "confirm-retired"])
     {
         Console.Error.WriteLine("""
             Owner-only commands (optional --tpm at end):
@@ -58,6 +59,7 @@ try
               revoke <ledger-dir> <license-id>
               list <ledger-dir> [customer-id]
               history <ledger-dir> <license-id>
+              replace <ledger-dir> <revoked-license-id> <activation.json> confirm-retired
             """);
         return 1;
     }
@@ -86,6 +88,7 @@ try
             args[6] == "lifetime" ? null : ParseDays(args[6]), now),
         "renew" => issuer.Renew(ParseId(args[2]), ParseDays(args[3]), now),
         "revoke" => issuer.Revoke(ParseId(args[2]), now),
+        "replace" => issuer.Replace(ParseId(args[2]), ReadActivationRequest(args[3]), now),
         _ => throw new InvalidOperationException("Unknown command.")
     };
     Console.WriteLine($"Signed license: {file}");
@@ -109,6 +112,10 @@ static void PrintRecord(LicensePayload record, DateTime now)
         $"License: {record.LicenseId} | Revision: {record.Revision} | Customer: {record.CustomerId} | Product: {record.ProductCode} | Status: {status}"));
     Console.WriteLine(FormattableString.Invariant(
         $"  Machine: {record.MachineCode} | Issued UTC: {record.IssuedAtUtc:O} | Expires UTC: {record.ExpiresAtUtc:O}"));
+    if (record.ReplacesLicenseId is long previousId)
+    {
+        Console.WriteLine(FormattableString.Invariant($"  Replaces license: {previousId}"));
+    }
 }
 
 static long ParseId(string value) => long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
